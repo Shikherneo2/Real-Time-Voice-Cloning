@@ -1,10 +1,14 @@
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+import sys
+
+sys.path.append("D:\Voice\Real-Time-Voice-Cloning")
+
 from vocoder.distribution import sample_from_discretized_mix_logistic
 from vocoder.display import *
 from vocoder.audio import *
-
 
 class ResBlock(nn.Module):
     def __init__(self, dims):
@@ -146,6 +150,7 @@ class WaveRNN(nn.Module):
         x = F.relu(self.fc2(x))
         return self.fc3(x)
 
+
     def generate(self, mels, batched, target, overlap, mu_law, progress_callback=None):
         mu_law = mu_law if self.mode == 'RAW' else False
         progress_callback = progress_callback or self.gen_display
@@ -241,7 +246,111 @@ class WaveRNN(nn.Module):
 
         return output
 
+    def generate_from_mel(self, mel, batched, overlap, target, mu_law=False, cpu=False, apply_preemphasis=False,  progress_callback=None):
+        mels = torch.from_numpy( np.array([ mel ]) )
+        mu_law = mu_law if self.mode == 'RAW' else False
+        progress_callback = progress_callback or self.gen_display
 
+        self.eval()
+        output = []
+        start = time.time()
+        rnn1 = self.get_gru_cell(self.rnn1)
+        rnn2 = self.get_gru_cell(self.rnn2)
+
+        with torch.no_grad():
+            if cpu is False:
+                mels = mels.cuda()
+            wave_len = (mels.size(-1) - 1) * self.hop_length
+            mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, cpu=cpu, side='both')
+            mels, aux = self.upsample(mels.transpose(1, 2))
+
+            if batched:
+                mels = self.fold_with_overlap(mels, target, overlap, cpu)
+                aux = self.fold_with_overlap(aux, target, overlap, cpu)
+
+            b_size, seq_len, _ = mels.size()
+
+            if cpu is False:
+                h1 = torch.zeros(b_size, self.rnn_dims).cuda()
+                h2 = torch.zeros(b_size, self.rnn_dims).cuda()
+                x = torch.zeros(b_size, 1).cuda()
+            else:
+                h1 = torch.zeros(b_size, self.rnn_dims)
+                h2 = torch.zeros(b_size, self.rnn_dims)
+                x = torch.zeros(b_size, 1)
+
+            d = self.aux_dims
+            aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
+
+            for i in range(seq_len):
+
+                m_t = mels[:, i, :]
+
+                a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
+
+                x = torch.cat([x, m_t, a1_t], dim=1)
+                x = self.I(x)
+                h1 = rnn1(x, h1)
+
+                x = x + h1
+                inp = torch.cat([x, a2_t], dim=1)
+                h2 = rnn2(inp, h2)
+
+                x = x + h2
+                x = torch.cat([x, a3_t], dim=1)
+                x = F.relu(self.fc1(x))
+
+                x = torch.cat([x, a4_t], dim=1)
+                x = F.relu(self.fc2(x))
+
+                logits = self.fc3(x)
+
+                if self.mode == 'MOL':
+                    sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
+                    output.append(sample.view(-1))
+                    # x = torch.FloatTensor([[sample]]).cuda()
+                    if cpu is False:
+                        x = sample.transpose(0, 1).cuda()
+                    else:
+                        x = sample.transpose(0, 1)
+
+                elif self.mode == 'RAW' :
+                    posterior = F.softmax(logits, dim=1)
+                    distrib = torch.distributions.Categorical(posterior)
+
+                    sample = 2 * distrib.sample().float() / (self.n_classes - 1.) - 1.
+                    output.append(sample)
+                    x = sample.unsqueeze(-1)
+                else:
+                    raise RuntimeError("Unknown model mode value - ", self.mode)
+
+                if i % 100 == 0:
+                    gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
+                    progress_callback(i, seq_len, b_size, gen_rate)
+
+        output = torch.stack(output).transpose(0, 1)
+        if cpu is False:
+            output = output.cpu().numpy().astype(np.float64)
+        else:
+            output = output.numpy().astype(np.float64)
+        
+        if batched:
+            output = self.xfade_and_unfold(output, target, overlap)
+        else:
+            output = output[0]
+
+        if mu_law:
+            output = decode_mu_law(output, self.n_classes, False)
+        if apply_preemphasis:
+            output = de_emphasis(output)
+
+        # Fade-out at the end to avoid signal cutting out suddenly
+        fade_out = np.linspace(1, 0, 20 * self.hop_length)
+        output = output[:wave_len]
+        output[-20 * self.hop_length:] *= fade_out
+        
+        return output
+    
     def gen_display(self, i, seq_len, b_size, gen_rate):
         pbar = progbar(i, seq_len)
         msg = f'| {pbar} {i*b_size}/{seq_len*b_size} | Batch Size: {b_size} | Gen Rate: {gen_rate:.1f}kHz | '
@@ -255,19 +364,22 @@ class WaveRNN(nn.Module):
         gru_cell.bias_ih.data = gru.bias_ih_l0.data
         return gru_cell
 
-    def pad_tensor(self, x, pad, side='both'):
+    def pad_tensor(self, x, pad, cpu=False, side='both'):
         # NB - this is just a quick method i need right now
         # i.e., it won't generalise to other shapes/dims
         b, t, c = x.size()
         total = t + 2 * pad if side == 'both' else t + pad
-        padded = torch.zeros(b, total, c).cuda()
+        if cpu is False:
+            padded = torch.zeros(b, total, c).cuda()
+        else:
+            padded = torch.zeros(b, total, c)
         if side == 'before' or side == 'both':
             padded[:, pad:pad + t, :] = x
         elif side == 'after':
             padded[:, :t, :] = x
         return padded
 
-    def fold_with_overlap(self, x, target, overlap):
+    def fold_with_overlap(self, x, target, overlap, cpu=False):
 
         ''' Fold the tensor with overlap for quick batched inference.
             Overlap will be used for crossfading in xfade_and_unfold()
@@ -304,9 +416,12 @@ class WaveRNN(nn.Module):
         if remaining != 0:
             num_folds += 1
             padding = target + 2 * overlap - remaining
-            x = self.pad_tensor(x, padding, side='after')
+            x = self.pad_tensor(x, padding, cpu=cpu, side='after')
 
-        folded = torch.zeros(num_folds, target + 2 * overlap, features).cuda()
+        if cpu is False:
+            folded = torch.zeros(num_folds, target + 2 * overlap, features).cuda()
+        else:
+            folded = torch.zeros(num_folds, target + 2 * overlap, features)
 
         # Get the values for the folded tensor
         for i in range(num_folds):
@@ -390,6 +505,14 @@ class WaveRNN(nn.Module):
     def log(self, path, msg) :
         with open(path, 'a') as f:
             print(msg, file=f)
+
+    def load_for_infer( self, path ) :
+        checkpoint = torch.load(path,map_location=lambda storage, loc: storage)
+        if "optimizer_state" in checkpoint:
+            self.load_state_dict(checkpoint["model_state"])
+        else:
+            # Backwards compatibility
+            self.load_state_dict(checkpoint)
 
     def load(self, path, optimizer) :
         checkpoint = torch.load(path)
