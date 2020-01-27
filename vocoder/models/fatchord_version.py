@@ -508,11 +508,12 @@ class WaveRNN(nn.Module):
 
     def load_for_infer( self, path ) :
         checkpoint = torch.load(path,map_location=lambda storage, loc: storage)
+        print(checkpoint.keys())
         if "optimizer_state" in checkpoint:
             self.load_state_dict(checkpoint["model_state"])
         else:
             # Backwards compatibility
-            self.load_state_dict(checkpoint)
+            self.load_state_dict(checkpoint["model"])
 
     def load(self, path, optimizer) :
         checkpoint = torch.load(path)
