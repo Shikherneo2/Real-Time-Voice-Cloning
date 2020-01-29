@@ -5,7 +5,7 @@ import argparse
 import os
 
 
-if __name__ == "__main__":
+def main():
     class MyFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
         pass
     
@@ -38,4 +38,7 @@ if __name__ == "__main__":
         args.out_dir = os.path.join(args.datasets_root, "SV2TTS", "vocoder")
     
     run_synthesis(args.in_dir, args.out_dir, args.model_dir, modified_hp)
+
+if __name__ == "__main__":
+    main()
     

@@ -18,3 +18,8 @@
 encoder/saved_models/*
 synthesizer/saved_models/*
 vocoder/saved_models/*
+experiments/*
+vocoder/allout.txt
+allout.txt
+nohup.out
+vocoder/nohup.out

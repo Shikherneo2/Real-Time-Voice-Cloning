@@ -125,7 +125,7 @@ hparams = HParams(
     trim_top_db=23,
     
     # Mel and Linear spectrograms normalization/scaling and clipping
-    signal_normalization=True,
+    signal_normalization=False,
     # Whether to normalize mel spectrograms to some predefined range (following below parameters)
     allow_clipping_in_normalization=True,  # Only relevant if mel_normalization = True
     symmetric_mels=True,

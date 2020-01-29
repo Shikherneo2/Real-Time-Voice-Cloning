@@ -153,7 +153,8 @@ class WaveRNN(nn.Module):
 
     def generate(self, mels, batched, target, overlap, mu_law, progress_callback=None):
         mu_law = mu_law if self.mode == 'RAW' else False
-        progress_callback = progress_callback or self.gen_display
+        if progress_callback is not None:
+            progress_callback = self.gen_display
 
         self.eval()
         output = []
@@ -218,10 +219,12 @@ class WaveRNN(nn.Module):
                     x = sample.unsqueeze(-1)
                 else:
                     raise RuntimeError("Unknown model mode value - ", self.mode)
-
-                if i % 100 == 0:
-                    gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
-                    progress_callback(i, seq_len, b_size, gen_rate)
+				
+                if progress_callback is not None:
+                    if i % 100 == 0:
+                        gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
+                        progress_callback(i, seq_len, b_size, gen_rate)
+                    
 
         output = torch.stack(output).transpose(0, 1)
         output = output.cpu().numpy()
@@ -349,6 +352,7 @@ class WaveRNN(nn.Module):
         output = output[:wave_len]
         output[-20 * self.hop_length:] *= fade_out
         
+        self.train()
         return output
     
     def gen_display(self, i, seq_len, b_size, gen_rate):
@@ -356,6 +360,7 @@ class WaveRNN(nn.Module):
         msg = f'| {pbar} {i*b_size}/{seq_len*b_size} | Batch Size: {b_size} | Gen Rate: {gen_rate:.1f}kHz | '
         stream(msg)
 
+	
     def get_gru_cell(self, gru):
         gru_cell = nn.GRUCell(gru.input_size, gru.hidden_size)
         gru_cell.weight_hh.data = gru.weight_hh_l0.data

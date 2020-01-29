@@ -4,52 +4,58 @@ from vocoder import audio
 import vocoder.hparams as hp
 import numpy as np
 import torch
-
+import librosa
 
 class VocoderDataset(Dataset):
-    def __init__(self, metadata_fpath: Path, mel_dir: Path, wav_dir: Path):
-        print("Using inputs from:\n\t%s\n\t%s\n\t%s" % (metadata_fpath, mel_dir, wav_dir))
+    def __init__(self, metadata_fpath):
         
-        with metadata_fpath.open("r") as metadata_file:
+        with open(metadata_fpath, "r") as metadata_file:
             metadata = [line.split("|") for line in metadata_file]
         
-        gta_fnames = [x[1] for x in metadata if int(x[4])]
-        gta_fpaths = [mel_dir.joinpath(fname) for fname in gta_fnames]
-        wav_fnames = [x[0] for x in metadata if int(x[4])]
-        wav_fpaths = [wav_dir.joinpath(fname) for fname in wav_fnames]
+        wav_fpaths = [ x[0].strip() for x in metadata ]
+        gta_fpaths = [ x[1].strip() for x in metadata ]
+      
         self.samples_fpaths = list(zip(gta_fpaths, wav_fpaths))
-        
+        self.number_of_samples = len(wav_fpaths)        
         print("Found %d samples" % len(self.samples_fpaths))
     
+    def get_number_of_samples(self):
+        return self.number_of_samples
+
     def __getitem__(self, index):  
         mel_path, wav_path = self.samples_fpaths[index]
         
         # Load the mel spectrogram and adjust its range to [-1, 1]
-        mel = np.load(mel_path).T.astype(np.float32) / hp.mel_max_abs_value
-        
+        # mel = np.load(mel_path).T.astype(np.float32) / hp.mel_max_abs_value
+        mel = np.load(mel_path).astype(np.float32)
+        wav = np.load(wav_path).astype(np.int64)
         # Load the wav
-        wav = np.load(wav_path)
-        if hp.apply_preemphasis:
-            wav = audio.pre_emphasis(wav)
-        wav = np.clip(wav, -1, 1)
+        # wav, _ = librosa.load( wav_path, 16000 )
+        # rescaling_max=0.9
+        # wav = wav / np.abs(wav).max() * rescaling_max
+
+        # # sh_changes - Removed these wav filterings, as openseq2seq does not do them
+        # # if hp.apply_preemphasis:
+        # #     wav = audio.pre_emphasis(wav)
+        # wav = np.clip(wav, -1, 1)
         
         # Fix for missing padding   # TODO: settle on whether this is any useful
-        r_pad =  (len(wav) // hp.hop_length + 1) * hp.hop_length - len(wav)
-        wav = np.pad(wav, (0, r_pad), mode='constant')
+        # r_pad =  (len(wav) // hp.hop_length + 1) * hp.hop_length - len(wav)
+        # wav = np.pad(wav, (0, r_pad), mode='constant')
         assert len(wav) >= mel.shape[1] * hp.hop_length
-        wav = wav[:mel.shape[1] * hp.hop_length]
+        # wav = wav[:mel.shape[1] * hp.hop_length]
         assert len(wav) % hp.hop_length == 0
         
         # Quantize the wav
-        if hp.voc_mode == 'RAW':
-            if hp.mu_law:
-                quant = audio.encode_mu_law(wav, mu=2 ** hp.bits)
-            else:
-                quant = audio.float_2_label(wav, bits=hp.bits)
-        elif hp.voc_mode == 'MOL':
-            quant = audio.float_2_label(wav, bits=16)
+        # if hp.voc_mode == 'RAW':
+        #     if hp.mu_law:
+        #         quant = audio.encode_mu_law(wav, mu=2 ** hp.bits)
+        #     else:
+        #         quant = audio.float_2_label(wav, bits=hp.bits)
+        # elif hp.voc_mode == 'MOL':
+        #     quant = audio.float_2_label(wav, bits=16)
             
-        return mel.astype(np.float32), quant.astype(np.int64)
+        return mel, wav
 
     def __len__(self):
         return len(self.samples_fpaths)

@@ -154,14 +154,17 @@ def split_on_silences(wav_fpath, words, end_times, hparams):
     
 def process_utterance(wav: np.ndarray, text: str, out_dir: Path, basename: str, 
                       skip_existing: bool, hparams):
-    ## FOR REFERENCE:
-    # For you not to lose your head if you ever wish to change things here or implement your own
-    # synthesizer.
+    ##  FOR REFERENCE:
+    #   For you not to lose your head if you ever wish to change things here or implement your own
+    #   synthesizer.
+
     # - Both the audios and the mel spectrograms are saved as numpy arrays
     # - There is no processing done to the audios that will be saved to disk beyond volume  
     #   normalization (in split_on_silences)
+
     # - However, pre-emphasis is applied to the audios before computing the mel spectrogram. This
     #   is why we re-apply it on the audio on the side of the vocoder.
+
     # - Librosa pads the waveform before computing the mel spectrogram. Here, the waveform is saved
     #   without extra padding. This means that you won't have an exact relation between the length
     #   of the wav and of the mel spectrogram. See the vocoder data loader.

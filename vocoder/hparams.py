@@ -15,7 +15,7 @@ mel_max_abs_value = _syn_hp.max_abs_value
 preemphasis = _syn_hp.preemphasis
 apply_preemphasis = _syn_hp.preemphasize
 
-bits = 9                            # bit depth of signal
+bits = 9                          # bit depth of signal
 mu_law = True                       # Recommended to suppress noise if using raw bits in hp.voc_mode
                                     # below
 
@@ -31,9 +31,9 @@ voc_res_out_dims = 128
 voc_res_blocks = 10
 
 # Training
-voc_batch_size = 100
+voc_batch_size = 110
 voc_lr = 1e-4
-voc_gen_at_checkpoint = 5           # number of samples to generate at each checkpoint
+voc_gen_at_checkpoint = 3          # number of samples to generate at each checkpoint
 voc_pad = 2                         # this will pad the input so that the resnet can 'see' wider 
                                     # than input length
 voc_seq_len = hop_length * 5        # must be a multiple of hop_length

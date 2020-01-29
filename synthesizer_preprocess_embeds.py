@@ -4,7 +4,7 @@ from pathlib import Path
 import argparse
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="Creates embeddings for the synthesizer from the LibriSpeech utterances.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -23,3 +23,7 @@ if __name__ == "__main__":
     # Preprocess the dataset
     print_args(args, parser)
     create_embeddings(**vars(args))    
+
+
+if __name__ == "__main__":
+    main()

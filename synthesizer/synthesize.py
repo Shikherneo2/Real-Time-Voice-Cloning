@@ -65,6 +65,7 @@ def run_synthesis(in_dir, out_dir, model_dir, hparams):
     mel_dir = os.path.join(in_dir, "mels")
     embed_dir = os.path.join(in_dir, "embeds")
     meta_out_fpath = os.path.join(out_dir, "synthesized.txt")
+    
     with open(meta_out_fpath, "w") as file:
         for i, meta in enumerate(tqdm(metadata)):
             texts = [m[5] for m in meta]

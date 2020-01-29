@@ -2,7 +2,7 @@ from vocoder.models.fatchord_version import WaveRNN
 from vocoder.vocoder_dataset import VocoderDataset, collate_vocoder
 from vocoder.distribution import discretized_mix_logistic_loss
 from vocoder.display import stream, simple_table
-from vocoder.gen_wavernn import gen_testset
+from vocoder.gen_wavernn import gen_testset, gen_meltest
 from torch.utils.data import DataLoader
 from pathlib import Path
 from torch import optim
@@ -12,8 +12,7 @@ import numpy as np
 import time
 
 
-def train(run_id: str, syn_dir: Path, voc_dir: Path, models_dir: Path, ground_truth: bool,
-          save_every: int, backup_every: int, force_restart: bool):
+def train(run_id: str, models_dir: Path, ground_truth: bool, save_every: int, backup_every: int, force_restart: bool):
     # Check to make sure the hop length is correctly factorised
     assert np.cumprod(hp.voc_upsample_factors)[-1] == hp.hop_length
     
@@ -43,8 +42,9 @@ def train(run_id: str, syn_dir: Path, voc_dir: Path, models_dir: Path, ground_tr
     # Load the weights
     model_dir = models_dir.joinpath(run_id)
     model_dir.mkdir(exist_ok=True)
-    weights_fpath = model_dir.joinpath(run_id + ".pt")
-    if force_restart or not weights_fpath.exists():
+    weights_fpath = "/home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments/first_run/checkpoint_490k_steps.pt" 
+
+    if force_restart:
         print("\nStarting the training of WaveRNN from scratch\n")
         model.save(weights_fpath, optimizer)
     else:
@@ -53,26 +53,30 @@ def train(run_id: str, syn_dir: Path, voc_dir: Path, models_dir: Path, ground_tr
         print("WaveRNN weights loaded from step %d" % model.step)
     
     # Initialize the dataset
-    metadata_fpath = syn_dir.joinpath("train.txt") if ground_truth else \
-        voc_dir.joinpath("synthesized.txt")
-    mel_dir = syn_dir.joinpath("mels") if ground_truth else voc_dir.joinpath("mels_gta")
-    wav_dir = syn_dir.joinpath("audio")
-    dataset = VocoderDataset(metadata_fpath, mel_dir, wav_dir)
+    metadata_fpath = "/home/sdevgupta/all_wavernn_vocoder_new.csv"
+    
+    dataset = VocoderDataset(metadata_fpath)
+    
     test_loader = DataLoader(dataset,
-                             batch_size=1,
-                             shuffle=True,
-                             pin_memory=True)
+                              batch_size=1,
+                              shuffle=True,
+                              pin_memory=True)
 
     # Begin the training
     simple_table([('Batch size', hp.voc_batch_size),
                   ('LR', hp.voc_lr),
                   ('Sequence Len', hp.voc_seq_len)])
+
+    epoch_start = int( (model.step-428000)*110/dataset.get_number_of_samples() )
+    epoch_end = 500
     
-    for epoch in range(1, 350):
+    print("Starting from epoch: "+str(epoch_start))
+
+    for epoch in range(epoch_start, epoch_end):
         data_loader = DataLoader(dataset,
                                  collate_fn=collate_vocoder,
                                  batch_size=hp.voc_batch_size,
-                                 num_workers=2,
+                                 num_workers=5,
                                  shuffle=True,
                                  pin_memory=True)
         start = time.time()
@@ -107,13 +111,14 @@ def train(run_id: str, syn_dir: Path, voc_dir: Path, models_dir: Path, ground_tr
                 
             if save_every != 0 and step % save_every == 0 :
                 model.save(weights_fpath, optimizer)
+            
+            if step%1000 == 0:
+                msg = f"| Epoch: {epoch} ({i}/{len(data_loader)}) | " \
+                    f"Loss: {avg_loss:.4f} | {speed:.1f} " \
+                    f"steps/s | Step: {k}k | "
+                print(msg)
+                print("\n")
 
-            msg = f"| Epoch: {epoch} ({i}/{len(data_loader)}) | " \
-                f"Loss: {avg_loss:.4f} | {speed:.1f} " \
-                f"steps/s | Step: {k}k | "
-            stream(msg)
-
-
-        gen_testset(model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched,
-                    hp.voc_target, hp.voc_overlap, model_dir)
-        print("")
+            if step%5000 == 0:
+                gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
+                gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )

@@ -1,5 +1,6 @@
 from vocoder.models.fatchord_version import  WaveRNN
 from vocoder.audio import *
+import vocoder.hparams as hp
 
 
 def gen_testset(model: WaveRNN, test_set, samples, batched, target, overlap, save_path):
@@ -26,6 +27,19 @@ def gen_testset(model: WaveRNN, test_set, samples, batched, target, overlap, sav
             "gen_not_batched"
         save_str = save_path.joinpath("%dk_steps_%d_%s.wav" % (k, i, batch_str))
 
-        wav = model.generate(m, batched, target, overlap, hp.mu_law)
+        wav = model.generate(m, batched, target, overlap, hp.mu_law, progress_callback=None)
         save_wav(wav, save_str)
+
+def gen_meltest( model: WaveRNN, batched, target, overlap, save_path ):
+	mel = []
+	mel.append( np.load("/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-1.npy").T /15 )
+	mel.append( np.load("/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-3.npy").T /15 )
+	mel.append( np.load("/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-5.npy").T /15 )
+	
+	k = model.get_step() // 1000
+	for i,m in enumerate(mel):
+		wav = model.generate_from_mel( m, batched=False, overlap=hp.voc_overlap, target=hp.voc_target, mu_law=True, cpu=False, apply_preemphasis=False )
+		#wav = wav / np.abs(wav).max() * 0.9
+		save_str = save_path.joinpath( "mel-"+str(i+1)+"-steps-"+str(k)+"k.wav" )
+		save_wav(wav, save_str)
 
