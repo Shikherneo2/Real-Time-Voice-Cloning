@@ -125,7 +125,7 @@ hparams = HParams(
     trim_top_db=23,
     
     # Mel and Linear spectrograms normalization/scaling and clipping
-    signal_normalization=False,
+    signal_normalization=True,
     # Whether to normalize mel spectrograms to some predefined range (following below parameters)
     allow_clipping_in_normalization=True,  # Only relevant if mel_normalization = True
     symmetric_mels=True,
@@ -143,7 +143,7 @@ hparams = HParams(
     # Contribution by @begeekmyfriend
     # Spectrogram Pre-Emphasis (Lfilter: Reduce spectrogram noise and helps model certitude 
 	# levels. Also allows for better G&L phase reconstruction)
-    preemphasize=True,  # whether to apply filter
+    preemphasize=False,  # whether to apply filter
     preemphasis=0.97,  # filter coefficient.
     
     # Limits

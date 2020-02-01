@@ -23,7 +23,7 @@ mel_basis_p = librosa.filters.mel(
           n_fft=800,
           n_mels=80,
           htk=True,
-          norm=True,
+          norm=None,
           fmax=None
       )
 
@@ -33,35 +33,35 @@ for wav_path in filenames:
         if( wav_full_path[-3:]!="wav" ):
             print( "error " + wav_full_path )
         wav, _ = librosa.load( wav_full_path, 16000 )
-#        mel = speech_utils.get_speech_features( 
-#								wav,
-#								sample_rate,
-#								80, 
-#								features_type="mel",
-#								n_fft=800,
-#								hop_length=200,
-#								mag_power=2,
-#								feature_normalize=False,
-#								mean=0.,
-#								std=1.,
-#								data_min=1e-5,
-#								mel_basis=mel_basis_p)
+        mel = speech_utils.get_speech_features( 
+								wav,
+								sample_rate,
+								80, 
+								features_type="mel",
+								n_fft=800,
+								hop_length=200,
+								mag_power=1,
+								feature_normalize=False,
+								mean=0.,
+								std=1.,
+								data_min=1e-5,
+								mel_basis=mel_basis_p)
         
-#       mel = mel.T/15
-#      mel = np.clip(mel, -1, 1)
-#     np.save( wav_path[1], mel )
-        mel = np.load(wav_path[1])
-        rescaling_max=0.9
-        wav = wav / np.abs(wav).max() * rescaling_max
-        wav = np.clip(wav, -1, 1)
+        mel = mel.T/10
+        mel = np.clip(mel, -1, 1)
+        np.save( wav_path[1], mel )
+#        mel = np.load(wav_path[1])
+#        rescaling_max=0.9
+     #    wav = wav / np.abs(wav).max() * rescaling_max
+        # wav = np.clip(wav, -1, 1)
 	
-        r_pad =  (len(wav) // hp.hop_length + 1) * hp.hop_length - len(wav)
-        wav = np.pad(wav, (0, r_pad), mode='constant')
+        # r_pad =  (len(wav) // hp.hop_length + 1) * hp.hop_length - len(wav)
+        # wav = np.pad(wav, (0, r_pad), mode='constant')
         
-        wav = wav[:mel.shape[1] * hp.hop_length]
-        wav = audio_vocoder.encode_mu_law(wav, mu=2 ** hp.bits)
+        # wav = wav[:mel.shape[1] * hp.hop_length]
+        # wav = audio_vocoder.encode_mu_law(wav, mu=2 ** hp.bits)
         
-        if(os.path.exists(os.path.join( op, wav_path[0].split("/")[-2] )) is False):
-            os.mkdir( os.path.join( op, wav_path[0].split("/")[-2] ) )
+        # if(os.path.exists(os.path.join( op, wav_path[0].split("/")[-2] )) is False):
+            # os.mkdir( os.path.join( op, wav_path[0].split("/")[-2] ) )
         
-        np.save( wav_path[0], wav )
+        # np.save( wav_path[0], wav )

@@ -42,7 +42,7 @@ def train(run_id: str, models_dir: Path, ground_truth: bool, save_every: int, ba
     # Load the weights
     model_dir = models_dir.joinpath(run_id)
     model_dir.mkdir(exist_ok=True)
-    weights_fpath = "/home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments/first_run/checkpoint_490k_steps.pt" 
+    weights_fpath = "/home/sdevgupta/mine/other_version/Real-Time-Voice-Cloning/experiments/second_run/checkpoint_550k_steps.pt" 
 
     if force_restart:
         print("\nStarting the training of WaveRNN from scratch\n")
@@ -76,7 +76,7 @@ def train(run_id: str, models_dir: Path, ground_truth: bool, save_every: int, ba
         data_loader = DataLoader(dataset,
                                  collate_fn=collate_vocoder,
                                  batch_size=hp.voc_batch_size,
-                                 num_workers=5,
+                                 num_workers=2,
                                  shuffle=True,
                                  pin_memory=True)
         start = time.time()
@@ -109,16 +109,16 @@ def train(run_id: str, models_dir: Path, ground_truth: bool, save_every: int, ba
             if backup_every != 0 and step % backup_every == 0 :
                 model.checkpoint(model_dir, optimizer)
                 
-            if save_every != 0 and step % save_every == 0 :
-                model.save(weights_fpath, optimizer)
+            # if save_every != 0 and step % save_every == 0 :
+            #     model.save(weights_fpath, optimizer)
             
             if step%1000 == 0:
                 msg = f"| Epoch: {epoch} ({i}/{len(data_loader)}) | " \
                     f"Loss: {avg_loss:.4f} | {speed:.1f} " \
                     f"steps/s | Step: {k}k | "
-                print(msg)
-                print("\n")
+                print(msg, flush=True)
+                print("\n", flush=True)
 
-            if step%5000 == 0:
+            if step%15000 == 0:
                 gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
                 gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )

@@ -11,14 +11,14 @@ import hparams as hp
 
 use_cpu = True
 sampling_rate = 16000
-path = "D:\Voice\wavernn_models\checkpoints\checkpoint_490k_steps.pt"
+path = "/home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments/first_run/checkpoint_530k_steps.pt"
 # path = "C:\\Users\\hades\\Downloads\\best_model_16K.pth.tar"
 
-mel_path = "D:\Voice\wavernn_models\mels\mels1\mel-1.npy"
+mel_path = "/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-1.npy"
 # mel_path = "C:\\Users\\hades\\Downloads\\dat\\mel-5.npy"
 
-mel = np.load(mel_path).T
-mel = mel/hp.mel_max_abs_value
+mel = np.load(mel_path).T/7.5
+mel = mel
 
 if use_cpu:
     model = WaveRNN(
