@@ -1,0 +1,5 @@
+nohup python -u vocoder_train.py --run_id second_run  \
+-m /home/sdevgupta/mine/other_version/Real-Time-Voice-Cloning/experiments \
+-d /home/sdevgupta/all_wavernn_vocoder_new.csv \
+-w /home/sdevgupta/mine/other_version/Real-Time-Voice-Cloning/experiments/second_run/checkpoint_675k_steps.pt \
+-g > allout.txt 2>&1 &

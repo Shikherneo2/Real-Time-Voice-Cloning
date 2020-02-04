@@ -27,6 +27,8 @@ mel_basis_p = librosa.filters.mel(
           fmax=None
       )
 
+maxm = -1
+minm = 1
 for wav_path in filenames:
         wav_full_path = wav_path[0].replace("/home/sdevgupta/mine/data/wavs", "/home/sdevgupta/mine/Blizzard2013_Segmentation/segments").replace("npy","wav")
         
@@ -47,9 +49,16 @@ for wav_path in filenames:
 								data_min=1e-5,
 								mel_basis=mel_basis_p)
         
-        mel = mel.T/10
-        mel = np.clip(mel, -1, 1)
-        np.save( wav_path[1], mel )
+        mel = mel.T
+        maxl = np.max(mel)
+        minl = np.min(mel)
+        if minl<minm:
+            minm=minl
+        if maxl>maxm:
+            maxm=maxl
+
+        #mel = np.clip(mel, -1, 1)
+        np.save( wav_path[1].replace("mels","mels2"), mel )
 #        mel = np.load(wav_path[1])
 #        rescaling_max=0.9
      #    wav = wav / np.abs(wav).max() * rescaling_max
@@ -65,3 +74,5 @@ for wav_path in filenames:
             # os.mkdir( os.path.join( op, wav_path[0].split("/")[-2] ) )
         
         # np.save( wav_path[0], wav )
+
+print(minm, maxm)

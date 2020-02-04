@@ -10,9 +10,11 @@ import torch.nn.functional as F
 import vocoder.hparams as hp
 import numpy as np
 import time
+import os
+from tensorboardX import SummaryWriter
 
 
-def train(run_id: str, models_dir: Path, ground_truth: bool, save_every: int, backup_every: int, force_restart: bool):
+def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, ground_truth: bool, save_every: int, backup_every: int, force_restart: bool):
     # Check to make sure the hop length is correctly factorised
     assert np.cumprod(hp.voc_upsample_factors)[-1] == hp.hop_length
     
@@ -42,7 +44,8 @@ def train(run_id: str, models_dir: Path, ground_truth: bool, save_every: int, ba
     # Load the weights
     model_dir = models_dir.joinpath(run_id)
     model_dir.mkdir(exist_ok=True)
-    weights_fpath = "/home/sdevgupta/mine/other_version/Real-Time-Voice-Cloning/experiments/second_run/checkpoint_550k_steps.pt" 
+    weights_fpath = weights_path
+    metadata_fpath = metadata_path
 
     if force_restart:
         print("\nStarting the training of WaveRNN from scratch\n")
@@ -53,7 +56,6 @@ def train(run_id: str, models_dir: Path, ground_truth: bool, save_every: int, ba
         print("WaveRNN weights loaded from step %d" % model.step)
     
     # Initialize the dataset
-    metadata_fpath = "/home/sdevgupta/all_wavernn_vocoder_new.csv"
     
     dataset = VocoderDataset(metadata_fpath)
     
@@ -68,11 +70,18 @@ def train(run_id: str, models_dir: Path, ground_truth: bool, save_every: int, ba
                   ('Sequence Len', hp.voc_seq_len)])
 
     epoch_start = int( (model.step-428000)*110/dataset.get_number_of_samples() )
-    epoch_end = 500
+    epoch_end = 200
     
+    log_path = os.path.join( models_dir, "logs" )
+    if not os.path.isdir(log_path):
+        os.mkdir(log_path)
+    
+    writer = SummaryWriter( log_path )
+    print("Log path : " + log_path)
+
     print("Starting from epoch: "+str(epoch_start))
 
-    for epoch in range(epoch_start, epoch_end):
+    for epoch in range(epoch_start, epoch_start+epoch_end):
         data_loader = DataLoader(dataset,
                                  collate_fn=collate_vocoder,
                                  batch_size=hp.voc_batch_size,
@@ -112,12 +121,12 @@ def train(run_id: str, models_dir: Path, ground_truth: bool, save_every: int, ba
             # if save_every != 0 and step % save_every == 0 :
             #     model.save(weights_fpath, optimizer)
             
-            if step%1000 == 0:
+            if step%500 == 0:
+                writer.add_scalar('Loss/train', avg_loss, round(step/1000,1))
                 msg = f"| Epoch: {epoch} ({i}/{len(data_loader)}) | " \
                     f"Loss: {avg_loss:.4f} | {speed:.1f} " \
                     f"steps/s | Step: {k}k | "
                 print(msg, flush=True)
-                print("\n", flush=True)
 
             if step%15000 == 0:
                 gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )

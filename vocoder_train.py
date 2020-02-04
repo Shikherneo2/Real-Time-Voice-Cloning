@@ -31,6 +31,10 @@ def main():
         "Path to the directory that will contain the saved model weights, as well as backups "
         "of those weights and wavs generated during training.")
     
+    parser.add_argument("-d", "--metadata_path", default="" )
+    
+    parser.add_argument( "-w", "--weights_path", default="" )
+    
     parser.add_argument("-g", "--ground_truth", action="store_true", help= \
         "Train on ground truth spectrograms (<datasets_root>/SV2TTS/synthesizer/mels).")
     
