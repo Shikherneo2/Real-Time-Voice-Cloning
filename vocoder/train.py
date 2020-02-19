@@ -13,7 +13,7 @@ import time
 import os
 from tensorboardX import SummaryWriter
 
-from distributed import init_distributed, apply_gradient_allreduce
+# from distributed import init_distributed, apply_gradient_allreduce
 
 
 def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, ground_truth: bool, save_every: int, backup_every: int, force_restart: bool):
@@ -71,10 +71,10 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
                   ('LR', hp.voc_lr),
                   ('Sequence Len', hp.voc_seq_len)])
 
-    epoch_start = int( (model.step-428000)*110/dataset.get_number_of_samples() )
+    epoch_start = int( model.step*60/dataset.get_number_of_samples() )
     epoch_end = 200
     
-    log_path = os.path.join( models_dir, "logs" )
+    log_path = os.path.join( model_dir, "logs" )
     if not os.path.isdir(log_path):
         os.mkdir(log_path)
     

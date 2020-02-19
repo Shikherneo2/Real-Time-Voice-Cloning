@@ -35,6 +35,9 @@ import torch.distributed as dist
 from torch.autograd import Variable
 
 from utils.argutils import print_args
+
+sys.path.append("/home/sdevgupta/mine/Real-Time-Voice-Cloning")
+
 from vocoder.train import train
 from pathlib import Path
 
@@ -154,7 +157,7 @@ def main(config, args_str):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
-    parser.add_argument("--run_id", type=str, help= \
+	parser.add_argument("--run_id", type=str, help= \
         "Name for this model instance. If a model state from the same run ID was previously "
         "saved, the training will restart from there. Pass -f to overwrite saved states and "
         "restart from scratch.")
@@ -169,40 +172,40 @@ def main(config, args_str):
     #     "Path to the vocoder directory that contains the GTA synthesized mel spectrograms. "
     #     "Defaults to <datasets_root>/SV2TTS/vocoder/. Unused if --ground_truth is passed.")
     
-    parser.add_argument("-m", "--models_dir", type=str, default="vocoder/saved_models/", help=\
+	parser.add_argument("-m", "--models_dir", type=str, default="vocoder/saved_models/", help=\
         "Path to the directory that will contain the saved model weights, as well as backups "
         "of those weights and wavs generated during training.")
     
-    parser.add_argument("-d", "--metadata_path", default="" )
-    
-    parser.add_argument( "-w", "--weights_path", default="" )
-    
-    parser.add_argument("-g", "--ground_truth", action="store_true", help= \
-        "Train on ground truth spectrograms (<datasets_root>/SV2TTS/synthesizer/mels).")
-    
-    parser.add_argument("-s", "--save_every", type=int, default=0, help= \
-        "Number of steps between updates of the model on the disk. Set to 0 to never save the "
-        "model.")
-    
-    parser.add_argument("-b", "--backup_every", type=int, default=15000, help= \
-        "Number of steps between backups of the model. Set to 0 to never make backups of the "
-        "model.")
-    
-    parser.add_argument("-f", "--force_restart", default=False, action="store_true", help= \
-        "Do not load any saved model and restart from scratch.")
-    
-    args = parser.parse_args()
+	parser.add_argument("-d", "--metadata_path", default="" )
 
-    # del args.datasets_root
-    args.models_dir = Path(args.models_dir)
-    args.models_dir.mkdir( exist_ok=True )
+	parser.add_argument( "-w", "--weights_path", default="" )
 
-    # Run the training
-    print_args(args, parser)
-    train(**vars(args))
+	parser.add_argument("-g", "--ground_truth", action="store_true", help= \
+		"Train on ground truth spectrograms (<datasets_root>/SV2TTS/synthesizer/mels).")
+
+	parser.add_argument("-s", "--save_every", type=int, default=0, help= \
+		"Number of steps between updates of the model on the disk. Set to 0 to never save the "
+		"model.")
+
+	parser.add_argument("-b", "--backup_every", type=int, default=15000, help= \
+		"Number of steps between backups of the model. Set to 0 to never make backups of the "
+		"model.")
+
+	parser.add_argument("-f", "--force_restart", default=False, action="store_true", help= \
+		"Do not load any saved model and restart from scratch.")
+
+	args = parser.parse_args()
+
+	# del args.datasets_root
+	args.models_dir = Path(args.models_dir)
+	args.models_dir.mkdir( exist_ok=True )
+
+	# Run the training
+	print_args(args, parser)
+	train(**vars(args))
 
 	# ----------------------------------------------------------------------------------------------------#
-	
+
 	args_list = ['train.py']
 	args_list += args_str.split(' ') if len(args_str) > 0 else []
 

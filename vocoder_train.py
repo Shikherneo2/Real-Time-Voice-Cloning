@@ -1,3 +1,5 @@
+import sys
+sys.path.append("/home/sdevgupta/mine/Real-Time-Voice-Cloning")
 from utils.argutils import print_args
 from vocoder.train import train
 from pathlib import Path

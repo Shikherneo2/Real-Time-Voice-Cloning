@@ -27,7 +27,7 @@ class VocoderDataset(Dataset):
         
         # Load the mel spectrogram and adjust its range to [-1, 1]
         # mel = np.load(mel_path).T.astype(np.float32) / hp.mel_max_abs_value
-        mel = np.load(mel_path).astype(np.float32)
+        mel = np.load(mel_path).astype(np.float32).T
         wav = np.load(wav_path).astype(np.int64)
         # Load the wav
         # wav, _ = librosa.load( wav_path, 16000 )

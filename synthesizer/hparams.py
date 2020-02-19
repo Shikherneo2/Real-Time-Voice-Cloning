@@ -111,10 +111,10 @@ hparams = HParams(
     silence_threshold=2,  # silence threshold used for sound trimming for wavenet preprocessing
     
     # Mel spectrogram  
-    n_fft=800,  # Extra window size is filled with 0 paddings to match this parameter
-    hop_size=200,  # For 16000Hz, 200 = 12.5 ms (0.0125 * sample_rate)
-    win_size=800,  # For 16000Hz, 800 = 50 ms (If None, win_size = n_fft) (0.05 * sample_rate)
-    sample_rate=16000,  # 16000Hz (corresponding to librispeech) (sox --i <filename>)
+    n_fft=1024,  # Extra window size is filled with 0 paddings to match this parameter
+    hop_size=256,  # For 16000Hz, 200 = 12.5 ms (0.0125 * sample_rate)
+    win_size=1024,  # For 16000Hz, 800 = 50 ms (If None, win_size = n_fft) (0.05 * sample_rate)
+    sample_rate=22050,  # 16000Hz (corresponding to librispeech) (sox --i <filename>)
     
     frame_shift_ms=None,  # Can replace hop_size parameter. (Recommended: 12.5)
     
@@ -152,7 +152,7 @@ hparams = HParams(
     fmin=55,
     # Set this to 55 if your speaker is male! if female, 95 should help taking off noise. (To 
 	# test depending on dataset. Pitch info: male~[65, 260], female~[100, 525])
-    fmax=7600,  # To be increased/reduced depending on data.
+    fmax=8000,  # To be increased/reduced depending on data.
     
     # Griffin Lim
     power=1.5,

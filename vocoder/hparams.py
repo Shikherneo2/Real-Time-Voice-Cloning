@@ -15,7 +15,7 @@ mel_max_abs_value = _syn_hp.max_abs_value
 preemphasis = _syn_hp.preemphasis
 apply_preemphasis = _syn_hp.preemphasize
 
-bits = 9                          # bit depth of signal
+bits = 11                          # bit depth of signal
 mu_law = True                       # Recommended to suppress noise if using raw bits in hp.voc_mode
                                     # below
 
@@ -23,7 +23,7 @@ mu_law = True                       # Recommended to suppress noise if using raw
 # WAVERNN / VOCODER --------------------------------------------------------------------------------
 voc_mode = 'RAW'                    # either 'RAW' (softmax on raw bits) or 'MOL' (sample from 
 # mixture of logistics)
-voc_upsample_factors = (5, 5, 8)    # NB - this needs to correctly factorise hop_length
+voc_upsample_factors = (4, 8, 8)    # NB - this needs to correctly factorise hop_length
 voc_rnn_dims = 512
 voc_fc_dims = 512
 voc_compute_dims = 128
@@ -31,7 +31,7 @@ voc_res_out_dims = 128
 voc_res_blocks = 10
 
 # Training
-voc_batch_size = 110
+voc_batch_size = 70
 voc_lr = 1e-4
 voc_gen_at_checkpoint = 3          # number of samples to generate at each checkpoint
 voc_pad = 2                         # this will pad the input so that the resnet can 'see' wider 
