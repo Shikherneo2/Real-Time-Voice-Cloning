@@ -5,16 +5,24 @@ import vocoder.hparams as hp
 import numpy as np
 import torch
 import librosa
+import pickle
 
 class VocoderDataset(Dataset):
     def __init__(self, metadata_fpath):
         
-        with open(metadata_fpath, "r") as metadata_file:
-            metadata = [line.split("|") for line in metadata_file]
+        # with open(metadata_fpath, "r") as metadata_file:
+        #     metadata = [line.split("|") for line in metadata_file]
         
-        wav_fpaths = [ x[0].strip() for x in metadata ]
-        gta_fpaths = [ x[1].strip() for x in metadata ]
-      
+        # wav_fpaths = [ x[0].strip() for x in metadata ]
+        # gta_fpaths = [ x[1].strip() for x in metadata ]
+
+		#MOL pickle
+        with open("/home/sdevgupta/mine/wavernn_erogol/dataset/dataset_ids.pkl", "rb") as f:
+            metadata = pickle.load(f)
+        
+        wav_fpaths = [ x[1].strip().replace("wavernn_erogol/dataset/wavs", "data/wavs_raw") for x in metadata ]
+        gta_fpaths = [ x[0].strip() for x in metadata ]
+
         self.samples_fpaths = list(zip(gta_fpaths, wav_fpaths))
         self.number_of_samples = len(wav_fpaths)        
         print("Found %d samples" % len(self.samples_fpaths))

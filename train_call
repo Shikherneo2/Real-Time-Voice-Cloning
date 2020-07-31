@@ -1,5 +1,11 @@
-nohup python -u vocoder_train.py --run_id second_run  \
--m /home/sdevgupta/mine/other_version/Real-Time-Voice-Cloning/experiments \
--d /home/sdevgupta/all_wavernn_vocoder_new.csv \
--w /home/sdevgupta/mine/other_version/Real-Time-Voice-Cloning/experiments/second_run/checkpoint_675k_steps.pt \
+nohup python -u vocoder_train.py --run_id fifth_run_new_gta_mol  \
+-m /home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments \
+-d /home/sdevgupta/mine/Real-Time-Voice-Cloning/train_lists/wavernn_gta_mels_train_list.txt \
+-w /home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments/fourth_run_gta/checkpoint_480k_steps.pt \
+-g > allout.txt 2>&1 &
+
+nohup python -u vocoder_train.py --run_id fourth_run_gta  \
+-m /home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments \
+-d /home/sdevgupta/mine/Real-Time-Voice-Cloning/train_lists/wavernn_gta_mels_train_list.txt \
+-w /home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments/fourth_run_gta/checkpoint_480k_steps.pt \
 -g > allout.txt 2>&1 &

@@ -51,7 +51,7 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
 
     if force_restart:
         print("\nStarting the training of WaveRNN from scratch\n")
-        model.save(weights_fpath, optimizer)
+        # model.save(weights_fpath, optimizer)
     else:
         print("\nLoading weights at %s" % weights_fpath)
         model.load(weights_fpath, optimizer)
@@ -71,8 +71,8 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
                   ('LR', hp.voc_lr),
                   ('Sequence Len', hp.voc_seq_len)])
 
-    epoch_start = int( model.step*60/dataset.get_number_of_samples() )
-    epoch_end = 200
+    epoch_start = int( model.step*hp.voc_batch_size/dataset.get_number_of_samples() )
+    epoch_end = 500
     
     log_path = os.path.join( model_dir, "logs" )
     if not os.path.isdir(log_path):
@@ -117,9 +117,6 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
             step = model.get_step()
             k = step // 1000
 
-            if backup_every != 0 and step % backup_every == 0 :
-                model.checkpoint(model_dir, optimizer)
-                
             # if save_every != 0 and step % save_every == 0 :
             #     model.save(weights_fpath, optimizer)
             
@@ -130,6 +127,7 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
                     f"steps/s | Step: {k}k | "
                 print(msg, flush=True)
 
-            if step%15000 == 0:
-                gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
-                gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )
+        if epoch%15 == 0:
+            model.checkpoint(model_dir, optimizer)
+            gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
+            gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )

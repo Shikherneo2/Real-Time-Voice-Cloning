@@ -1,14 +1,63 @@
+import sys
+import time
 import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-import sys
 
-sys.path.append("D:\Voice\Real-Time-Voice-Cloning")
+# sys.path.append("D:\Voice\Real-Time-Voice-Cloning")
 
 from vocoder.distribution import sample_from_discretized_mix_logistic
 from vocoder.display import *
 from vocoder.audio import *
+
+torch.backends.cudnn.enabled = True
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+@torch.jit.script
+def sample_from_discretized_mix_logistic( y ):
+  """
+  Sample from discretized mixture of logistic distributions
+  Args:
+      y (Tensor): B x C x T
+      log_scale_min (float): Log scale minimum value
+  Returns:
+      Tensor: sample in range of [-1, 1].
+  """
+  nr_mix = y.size(1) // 3
+
+  # B x T x C
+  y = y.transpose(1, 2)
+  logit_probs = y[:, :, :nr_mix]
+
+  # sample mixture indicator from softmax
+  temp = torch.zeros(logit_probs.size(), dtype=logit_probs.data.dtype).uniform_(1e-5, 1.0 - 1e-5)
+  if logit_probs.is_cuda:
+    temp = temp.cuda()
+  temp = logit_probs.data - torch.log(- torch.log(temp))
+  _, argmax = temp.max(dim=-1)
+
+  # (B, T) -> (B, T, nr_mix)
+  one_hot = torch.zeros(argmax.size() + (nr_mix,), dtype=torch.float32)
+  if argmax.is_cuda:
+      one_hot = one_hot.cuda()
+  one_hot.scatter_(len(argmax.size()), argmax.unsqueeze(-1), 1)
+  
+  # select logistic parameters
+  means = torch.sum(y[:, :, nr_mix:2 * nr_mix] * one_hot, dim=-1)
+  
+  vv = torch.sum(y[:, :, 2 * nr_mix:3 * nr_mix] * one_hot, dim=-1)
+  log_scales = torch.clamp(vv, min=-32.23619130191664)
+  
+  # sample from logistic & clip to interval
+  # we don't actually round to the nearest 8bit value when sampling
+  u = torch.zeros( means.size(), dtype=means.data.dtype ).uniform_(1e-5, 1.0 - 1e-5).cuda()
+  x = means + torch.exp(log_scales) * (torch.log(u) - torch.log(1. - u))
+
+  x = torch.clamp(torch.clamp(x, min=-1.), max=1.)
+
+  return x
 
 class ResBlock(nn.Module):
     def __init__(self, dims):
@@ -205,7 +254,8 @@ class WaveRNN(nn.Module):
                 logits = self.fc3(x)
 
                 if self.mode == 'MOL':
-                    sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
+                    b = logits.unsqueeze(0).transpose(1, 2)
+                    sample = sample_from_discretized_mix_logistic(b)
                     output.append(sample.view(-1))
                     # x = torch.FloatTensor([[sample]]).cuda()
                     x = sample.transpose(0, 1).cuda()
@@ -219,7 +269,7 @@ class WaveRNN(nn.Module):
                     x = sample.unsqueeze(-1)
                 else:
                     raise RuntimeError("Unknown model mode value - ", self.mode)
-				
+        
                 if progress_callback is not None:
                     if i % 100 == 0:
                         gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
@@ -241,13 +291,113 @@ class WaveRNN(nn.Module):
         #    output = de_emphasis(output)
 
         # Fade-out at the end to avoid signal cutting out suddenly
-        fade_out = np.linspace(1, 0, 20 * self.hop_length)
-        output = output[:wave_len]
-        output[-20 * self.hop_length:] *= fade_out
+        # fade_out = np.linspace(1, 0, 5 * self.hop_length)
+        # output = output[:wave_len]
+        # output[-5 * self.hop_length:] *= fade_out
         
         self.train()
 
         return output
+
+    def to_one_hot( self, tensor, n, fill_with=1. ):
+      # we perform one hot encore with respect to the last axis
+      one_hot = torch.FloatTensor(tensor.size() + (n,)).zero_()
+      if tensor.is_cuda:
+          one_hot = one_hot.cuda()
+      one_hot.scatter_(len(tensor.size()), tensor.unsqueeze(-1), fill_with)
+      return one_hot
+
+
+    @torch.jit.script
+    def generate_from_mel_simplified_mold( self, mel, cpu=False ):
+      mels = torch.from_numpy( np.array([ mel ]) )
+
+      self.eval()
+      output = []
+      start = time.time()
+      rnn1 = self.get_gru_cell(self.rnn1)
+      rnn2 = self.get_gru_cell(self.rnn2)
+
+      with torch.no_grad():
+          if cpu is False:
+              mels = mels.cuda()
+          wave_len = (mels.size(-1) - 1) * self.hop_length
+          mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, cpu=cpu, side='both')
+          mels, aux = self.upsample(mels.transpose(1, 2))
+
+          b_size, seq_len, _ = mels.size()
+
+          if cpu is False:
+              h1 = torch.zeros(b_size, self.rnn_dims).cuda()
+              h2 = torch.zeros(b_size, self.rnn_dims).cuda()
+              x = torch.zeros(b_size, 1).cuda()
+          else:
+              h1 = torch.zeros(b_size, self.rnn_dims)
+              h2 = torch.zeros(b_size, self.rnn_dims)
+              x = torch.zeros(b_size, 1)
+
+          d = self.aux_dims
+          aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
+
+          setup = time.time()
+          for i in range(seq_len):
+              m_t = mels[:, i, :]
+
+              a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
+
+              x = torch.cat([x, m_t, a1_t], dim=1)
+              x = self.I(x)
+              h1 = rnn1(x, h1)
+
+              x = x + h1
+              inp = torch.cat([x, a2_t], dim=1)
+              h2 = rnn2(inp, h2)
+
+              x = x + h2
+              x = torch.cat([x, a3_t], dim=1)
+              x = F.relu(self.fc1(x))
+
+              x = torch.cat([x, a4_t], dim=1)
+              x = F.relu(self.fc2(x))
+
+              logits = self.fc3(x)
+
+              b = logits.unsqueeze(0).transpose(1, 2)
+              
+              assert b.size(1) % 3 == 0
+              sample = sample_from_discretized_mix_logistic( b )
+              output.append(sample.view(-1))
+              
+              if cpu is False:
+                  x = sample.transpose(0, 1).cuda()
+              else:
+                  x = sample.transpose(0, 1)
+
+      output = torch.stack(output).transpose(0, 1)
+
+      if cpu is False:
+          output = output.cpu().numpy().astype(np.float64)
+      else:
+          output = output.numpy().astype(np.float64)
+      
+      output = output[0]
+
+      setup2 = time.time()
+      # Fade-out at the end to avoid signal cutting out suddenly
+      fade_out = np.linspace(1, 0, 10 * self.hop_length)
+      output = output[:wave_len]
+      output[-10 * self.hop_length:] *= fade_out
+      
+      self.train()
+
+      final = time.time()
+      print( "Setup time : "+ str((setup-start)/(final-start)) + ", "+ str( (setup-start)*1000 )+"milliseconds" )
+      print( "Loop time : "+ str((setup2-setup)/(final-start)) + ", "+ str( (setup2-setup)*1000 )+"milliseconds" )
+      print( "Fade time : "+ str((final-setup2)/(final-start)) + ", "+ str( (final-setup2)*1000 )+"milliseconds" )
+      print( "Total time : "+ str(final-start) + ", "+ str( (final-start)*1000 )+"milliseconds" )
+      print( "Rate : "+str( seq_len/(final-start) )+"Hz" )
+      return output
+
 
     def generate_from_mel(self, mel, batched, overlap, target, mu_law=False, cpu=False, apply_preemphasis=False,  progress_callback=None):
         mels = torch.from_numpy( np.array([ mel ]) )
@@ -309,7 +459,8 @@ class WaveRNN(nn.Module):
                 logits = self.fc3(x)
 
                 if self.mode == 'MOL':
-                    sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
+                    b = logits.unsqueeze(0).transpose(1, 2)
+                    sample = sample_from_discretized_mix_logistic( b )
                     output.append(sample.view(-1))
                     # x = torch.FloatTensor([[sample]]).cuda()
                     if cpu is False:
@@ -348,19 +499,20 @@ class WaveRNN(nn.Module):
             output = de_emphasis(output)
 
         # Fade-out at the end to avoid signal cutting out suddenly
-        fade_out = np.linspace(1, 0, 20 * self.hop_length)
+        fade_out = np.linspace(1, 0, 10 * self.hop_length)
         output = output[:wave_len]
-        output[-20 * self.hop_length:] *= fade_out
+        output[-10 * self.hop_length:] *= fade_out
         
         self.train()
         return output
-    
+
+
     def gen_display(self, i, seq_len, b_size, gen_rate):
         pbar = progbar(i, seq_len)
         msg = f'| {pbar} {i*b_size}/{seq_len*b_size} | Batch Size: {b_size} | Gen Rate: {gen_rate:.1f}kHz | '
         stream(msg)
 
-	
+  
     def get_gru_cell(self, gru):
         gru_cell = nn.GRUCell(gru.input_size, gru.hidden_size)
         gru_cell.weight_hh.data = gru.weight_hh_l0.data
@@ -476,7 +628,8 @@ class WaveRNN(nn.Module):
         silence_len = overlap // 2
         fade_len = overlap - silence_len
         silence = np.zeros((silence_len), dtype=np.float64)
-
+        linear = np.ones((silence_len), dtype=np.float64)
+        
         # Equal power crossfade
         t = np.linspace(-1, 1, fade_len, dtype=np.float64)
         fade_in = np.sqrt(0.5 * (1 + t))
@@ -484,7 +637,7 @@ class WaveRNN(nn.Module):
 
         # Concat the silence to the fades
         fade_in = np.concatenate([silence, fade_in])
-        fade_out = np.concatenate([fade_out, silence])
+        fade_out = np.concatenate([linear, fade_out])
 
         # Apply the gain to the overlap samples
         y[:, :overlap] *= fade_in

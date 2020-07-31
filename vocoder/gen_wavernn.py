@@ -39,7 +39,7 @@ def gen_meltest( model: WaveRNN, batched, target, overlap, save_path ):
 	
 	k = model.get_step() // 1000
 	for i,m in enumerate(mel):
-		wav = model.generate_from_mel( m, batched=False, overlap=hp.voc_overlap, target=hp.voc_target, mu_law=True, cpu=False, apply_preemphasis=False )
+		wav = model.generate_from_mel( m, batched=True, overlap=hp.voc_overlap, target=hp.voc_target, mu_law=True, cpu=False, apply_preemphasis=False )
 		save_str = save_path.joinpath( "mel-"+str(i+1)+"-steps-"+str(k)+"k.wav" )
 		save_wav(wav, save_str)
 

@@ -14,11 +14,11 @@ sample_rate = 22050
 utterance_min_duration = 1.6
 
 dir = "/home/sdevgupta/mine/data/mels"
-wav_dir = dir.replace("/mels","/wavs")
+wav_dir = dir.replace("/mels","/wavs_mol")
 
 filenames = [ i for i in os.listdir(dir) ]
 
-write_metadata = open("/home/sdevgupta/new_train_list.txt","w")
+# write_metadata = open("/home/sdevgupta/new_train_list.txt","w")
 
 for mel_path in tqdm(filenames):
         wav_full_path = os.path.join( "/home/sdevgupta/mine/Blizzard2013_Segmentation/segments", mel_path[:len(mel_path)-mel_path[::-1].find("_")-1],mel_path[len(mel_path)-mel_path[::-1].find("_"):] )
@@ -37,12 +37,13 @@ for mel_path in tqdm(filenames):
         wav = np.pad(wav, (0, r_pad), mode='constant')
         
         wav = wav[:mel.shape[1] * hp.hop_length]
-        wav = audio_vocoder.encode_mu_law(wav, mu=2 ** hp.bits)
+        wav = audio_vocoder.float_2_label(wav, bits=16)
+        # wav = audio_vocoder.encode_mu_law(wav, mu=2 ** hp.bits)
         
         # if(os.path.exists(os.path.join( op, wav_path[0].split("/")[-2] )) is False):
         #     os.mkdir( os.path.join( op, wav_path[0].split("/")[-2] ) )
         output_wav_path = os.path.join( wav_dir, mel_path.replace(".wav",".npy") )
         np.save( output_wav_path, wav )
-        write_metadata.write("|".join([ output_wav_path, full_mel_path ])+"\n")
+        # write_metadata.write("|".join([ output_wav_path, full_mel_path ])+"\n")
 
-write_metadata.close()
+# write_metadata.close()

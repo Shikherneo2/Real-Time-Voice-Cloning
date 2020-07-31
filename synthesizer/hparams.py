@@ -310,16 +310,12 @@ hparams = HParams(
     # Whether to use GTA mels to train WaveNet instead of ground truth mels.
     ###########################################################################################################################################
     
-    # Eval sentences (if no eval text file was specified during synthesis, these sentences are 
-	# used for eval)
+    # Eval sentences (if no eval text file was specified during synthesis, these sentences are used for eval)
     sentences=[
-        # From July 8, 2017 New York Times:
         "Scientists at the CERN laboratory say they have discovered a new particle.",
-        "There\"s a way to measure the acute emotional intelligence that has never gone out of "
-		"style.",
+        "There\"s a way to measure the acute emotional intelligence that has never gone out of style.",
         "President Trump met with other leaders at the Group of 20 conference.",
         "The Senate\"s bill to repeal and replace the Affordable Care Act is now imperiled.",
-        # From Google"s Tacotron example page:
         "Generative adversarial network or variational auto-encoder.",
         "Basilar membrane and otolaryngology are not auto-correlations.",
         "He has read the whole thing.",
@@ -331,7 +327,6 @@ hparams = HParams(
         "Peter Piper picked a peck of pickled peppers. How many pickled peppers did Peter Piper pick?",
         "She sells sea-shells on the sea-shore. The shells she sells are sea-shells I'm sure.",
         "Tajima Airport serves Toyooka.",
-        # From The web (random long utterance)
         "Sequence to sequence models have enjoyed great success in a variety of tasks such as machine translation, speech recognition, and text summarization.\
         This project covers a sequence to sequence model trained to predict a speech representation from an input sequence of characters. We show that\
         the adopted architecture is able to perform this task with wild success.",
