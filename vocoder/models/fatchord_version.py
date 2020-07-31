@@ -15,6 +15,20 @@ torch.backends.cudnn.enabled = True
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+# feat_dims = 80
+# fc_dims = 512
+# rnn_dims = 512
+# aux_dims = 128 // 4
+# n_classes = 30
+
+# I = nn.Linear(feat_dims + aux_dims + 1, rnn_dims)
+# rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
+# rnn2 = nn.GRU(rnn_dims + aux_dims, rnn_dims, batch_first=True)
+# fc1 = nn.Linear(rnn_dims + aux_dims, fc_dims)
+# fc2 = nn.Linear(fc_dims + aux_dims, fc_dims)
+# fc3 = nn.Linear(fc_dims, n_classes)
+
+
 @torch.jit.script
 def sample_from_discretized_mix_logistic( y ):
   """
@@ -58,6 +72,7 @@ def sample_from_discretized_mix_logistic( y ):
   x = torch.clamp(torch.clamp(x, min=-1.), max=1.)
 
   return x
+
 
 class ResBlock(nn.Module):
     def __init__(self, dims):
@@ -109,15 +124,16 @@ class Stretch2d(nn.Module):
         x = x.repeat(1, 1, 1, self.y_scale, 1, self.x_scale)
         return x.view(b, c, h * self.y_scale, w * self.x_scale)
 
-
 class UpsampleNetwork(nn.Module):
     def __init__(self, feat_dims, upsample_scales, compute_dims,
                  res_blocks, res_out_dims, pad):
         super().__init__()
-        total_scale = np.cumproduct(upsample_scales)[-1]
-        self.indent = pad * total_scale
+        # total_scale: UpsampleNetwork
+        # resnet_stretch: UpsampleNetwork
+        self.total_scale = np.cumproduct(upsample_scales)[-1]
+        self.indent = pad * self.total_scale
         self.resnet = MelResNet(res_blocks, feat_dims, compute_dims, res_out_dims, pad)
-        self.resnet_stretch = Stretch2d(total_scale, 1)
+        self.resnet_stretch = Stretch2d(self.total_scale, 1)
         self.up_layers = nn.ModuleList()
         for scale in upsample_scales:
             k_size = (1, scale * 2 + 1)
@@ -131,7 +147,6 @@ class UpsampleNetwork(nn.Module):
     def forward(self, m):
         aux = self.resnet(m).unsqueeze(1)
         aux = self.resnet_stretch(aux)
-        aux = aux.squeeze(1)
         m = m.unsqueeze(1)
         for f in self.up_layers: m = f(m)
         m = m.squeeze(1)[:, :, self.indent:-self.indent]
@@ -139,19 +154,13 @@ class UpsampleNetwork(nn.Module):
 
 
 class WaveRNN(nn.Module):
-    def __init__(self, rnn_dims, fc_dims, bits, pad, upsample_factors,
+    def __init__(self, rnn_dims, fc_dims, bits, pad: int, upsample_factors,
                  feat_dims, compute_dims, res_out_dims, res_blocks,
-                 hop_length, sample_rate, mode='RAW'):
+                 hop_length, sample_rate):
         super().__init__()
-        self.mode = mode
         self.pad = pad
-        if self.mode == 'RAW' :
-            self.n_classes = 2 ** bits
-        elif self.mode == 'MOL' :
-            self.n_classes = 30
-        else :
-            RuntimeError("Unknown model mode value - ", self.mode)
-
+        self.n_classes = 30
+        self.training = False
         self.rnn_dims = rnn_dims
         self.aux_dims = res_out_dims // 4
         self.hop_length = hop_length
@@ -168,372 +177,105 @@ class WaveRNN(nn.Module):
         self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
         self.num_params()
 
-    def forward(self, x, mels):
-        self.step += 1
-        bsize = x.size(0)
-        h1 = torch.zeros(1, bsize, self.rnn_dims).cuda()
-        h2 = torch.zeros(1, bsize, self.rnn_dims).cuda()
-        mels, aux = self.upsample(mels)
 
-        aux_idx = [self.aux_dims * i for i in range(5)]
-        a1 = aux[:, :, aux_idx[0]:aux_idx[1]]
-        a2 = aux[:, :, aux_idx[1]:aux_idx[2]]
-        a3 = aux[:, :, aux_idx[2]:aux_idx[3]]
-        a4 = aux[:, :, aux_idx[3]:aux_idx[4]]
-
-        x = torch.cat([x.unsqueeze(-1), mels, a1], dim=2)
-        x = self.I(x)
-        res = x
-        x, _ = self.rnn1(x, h1)
-
-        x = x + res
-        res = x
-        x = torch.cat([x, a2], dim=2)
-        x, _ = self.rnn2(x, h2)
-
-        x = x + res
-        x = torch.cat([x, a3], dim=2)
-        x = F.relu(self.fc1(x))
-
-        x = torch.cat([x, a4], dim=2)
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)
-
-
-    def generate(self, mels, batched, target, overlap, mu_law, progress_callback=None):
-        mu_law = mu_law if self.mode == 'RAW' else False
-        if progress_callback is not None:
-            progress_callback = self.gen_display
-
-        self.eval()
-        output = []
-        start = time.time()
-        rnn1 = self.get_gru_cell(self.rnn1)
-        rnn2 = self.get_gru_cell(self.rnn2)
-
-        with torch.no_grad():
-            mels = mels.cuda()
-            wave_len = (mels.size(-1) - 1) * self.hop_length
-            mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, side='both')
-            mels, aux = self.upsample(mels.transpose(1, 2))
-
-            if batched:
-                mels = self.fold_with_overlap(mels, target, overlap)
-                aux = self.fold_with_overlap(aux, target, overlap)
-
-            b_size, seq_len, _ = mels.size()
-
-            h1 = torch.zeros(b_size, self.rnn_dims).cuda()
-            h2 = torch.zeros(b_size, self.rnn_dims).cuda()
-            x = torch.zeros(b_size, 1).cuda()
-
-            d = self.aux_dims
-            aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
-
-            for i in range(seq_len):
-
-                m_t = mels[:, i, :]
-
-                a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
-
-                x = torch.cat([x, m_t, a1_t], dim=1)
-                x = self.I(x)
-                h1 = rnn1(x, h1)
-
-                x = x + h1
-                inp = torch.cat([x, a2_t], dim=1)
-                h2 = rnn2(inp, h2)
-
-                x = x + h2
-                x = torch.cat([x, a3_t], dim=1)
-                x = F.relu(self.fc1(x))
-
-                x = torch.cat([x, a4_t], dim=1)
-                x = F.relu(self.fc2(x))
-
-                logits = self.fc3(x)
-
-                if self.mode == 'MOL':
-                    b = logits.unsqueeze(0).transpose(1, 2)
-                    sample = sample_from_discretized_mix_logistic(b)
-                    output.append(sample.view(-1))
-                    # x = torch.FloatTensor([[sample]]).cuda()
-                    x = sample.transpose(0, 1).cuda()
-
-                elif self.mode == 'RAW' :
-                    posterior = F.softmax(logits, dim=1)
-                    distrib = torch.distributions.Categorical(posterior)
-
-                    sample = 2 * distrib.sample().float() / (self.n_classes - 1.) - 1.
-                    output.append(sample)
-                    x = sample.unsqueeze(-1)
-                else:
-                    raise RuntimeError("Unknown model mode value - ", self.mode)
-        
-                if progress_callback is not None:
-                    if i % 100 == 0:
-                        gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
-                        progress_callback(i, seq_len, b_size, gen_rate)
-                    
-
-        output = torch.stack(output).transpose(0, 1)
-        output = output.cpu().numpy()
-        output = output.astype(np.float64)
-        
-        if batched:
-            output = self.xfade_and_unfold(output, target, overlap)
-        else:
-            output = output[0]
-
-        if mu_law:
-            output = decode_mu_law(output, self.n_classes, False)
-        #if hp.apply_preemphasis:
-        #    output = de_emphasis(output)
-
-        # Fade-out at the end to avoid signal cutting out suddenly
-        # fade_out = np.linspace(1, 0, 5 * self.hop_length)
-        # output = output[:wave_len]
-        # output[-5 * self.hop_length:] *= fade_out
-        
-        self.train()
-
-        return output
-
-    def to_one_hot( self, tensor, n, fill_with=1. ):
-      # we perform one hot encore with respect to the last axis
-      one_hot = torch.FloatTensor(tensor.size() + (n,)).zero_()
-      if tensor.is_cuda:
-          one_hot = one_hot.cuda()
-      one_hot.scatter_(len(tensor.size()), tensor.unsqueeze(-1), fill_with)
-      return one_hot
-
-
-    @torch.jit.script
-    def generate_from_mel_simplified_mold( self, mel, cpu=False ):
-      mels = torch.from_numpy( np.array([ mel ]) )
-
-      self.eval()
+    @torch.no_grad()
+    def forward( self, mels ):
+      # self.eval()
       output = []
-      start = time.time()
-      rnn1 = self.get_gru_cell(self.rnn1)
-      rnn2 = self.get_gru_cell(self.rnn2)
+      # rnn1 = self.get_gru_cell(self.rnn1)
+      # rnn2 = self.get_gru_cell(self.rnn2)
 
-      with torch.no_grad():
-          if cpu is False:
-              mels = mels.cuda()
-          wave_len = (mels.size(-1) - 1) * self.hop_length
-          mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, cpu=cpu, side='both')
-          mels, aux = self.upsample(mels.transpose(1, 2))
+      mels = mels.cuda()
+      wave_len = (mels.size(-1) - 1) * self.hop_length
+      mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad)
+      mels, aux = self.upsample(mels.transpose(1, 2))
 
-          b_size, seq_len, _ = mels.size()
+      b_size, seq_len, _ = mels.size()
 
-          if cpu is False:
-              h1 = torch.zeros(b_size, self.rnn_dims).cuda()
-              h2 = torch.zeros(b_size, self.rnn_dims).cuda()
-              x = torch.zeros(b_size, 1).cuda()
-          else:
-              h1 = torch.zeros(b_size, self.rnn_dims)
-              h2 = torch.zeros(b_size, self.rnn_dims)
-              x = torch.zeros(b_size, 1)
+      h1 = torch.zeros(b_size, self.rnn_dims).cuda()
+      h2 = torch.zeros(b_size, self.rnn_dims).cuda()
+      x = torch.zeros(b_size, 1).cuda()
+      
+      d = self.aux_dims
+      aux_splits = []
+      aux_splits.append( aux[:, :, :d])
+      aux_splits.append( aux[:, :, d:d * 2])
+      aux_splits.append( aux[:, :, d * 2:d * 3])
+      aux_splits.append( aux[:, :, d * 3:d * 4])
+      
+      outputs = []
+      for i in range(seq_len):
+        m_t = mels[:, i, :]
 
-          d = self.aux_dims
-          aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
+        a1_t = aux_splits[0][:, i, :]
+        a2_t = aux_splits[1][:, i, :]
+        a3_t = aux_splits[2][:, i, :]
+        a4_t = aux_splits[3][:, i, :]
 
-          setup = time.time()
-          for i in range(seq_len):
-              m_t = mels[:, i, :]
+        x = torch.cat([x, m_t, a1_t], dim=1)
+        x = I(x)
+        h1 = self.rnn1(x, h1)
 
-              a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
+        x = x + h1
+        inp = torch.cat([x, a2_t], dim=1)
+        h2 = self.rnn2(inp, h2)
 
-              x = torch.cat([x, m_t, a1_t], dim=1)
-              x = self.I(x)
-              h1 = rnn1(x, h1)
+        x = x + h2
+        x = torch.cat([x, a3_t], dim=1)
+        x = F.relu(fc1(x))
 
-              x = x + h1
-              inp = torch.cat([x, a2_t], dim=1)
-              h2 = rnn2(inp, h2)
+        x = torch.cat([x, a4_t], dim=1)
+        x = F.relu(fc2(x))
 
-              x = x + h2
-              x = torch.cat([x, a3_t], dim=1)
-              x = F.relu(self.fc1(x))
+        logits = fc3(x)
 
-              x = torch.cat([x, a4_t], dim=1)
-              x = F.relu(self.fc2(x))
-
-              logits = self.fc3(x)
-
-              b = logits.unsqueeze(0).transpose(1, 2)
-              
-              assert b.size(1) % 3 == 0
-              sample = sample_from_discretized_mix_logistic( b )
-              output.append(sample.view(-1))
-              
-              if cpu is False:
-                  x = sample.transpose(0, 1).cuda()
-              else:
-                  x = sample.transpose(0, 1)
+        b = logits.unsqueeze(0).transpose(1, 2)
+        
+        assert b.size(1) % 3 == 0
+        sample = sample_from_discretized_mix_logistic( b )
+        output = sample.view(-1)
+        
+        x = sample.transpose(0, 1).cuda()
+        outputs.append(output)
 
       output = torch.stack(output).transpose(0, 1)
-
-      if cpu is False:
-          output = output.cpu().numpy().astype(np.float64)
-      else:
-          output = output.numpy().astype(np.float64)
+      output = output.cpu().numpy().astype(np.float64)
       
       output = output[0]
 
-      setup2 = time.time()
       # Fade-out at the end to avoid signal cutting out suddenly
       fade_out = np.linspace(1, 0, 10 * self.hop_length)
       output = output[:wave_len]
       output[-10 * self.hop_length:] *= fade_out
       
-      self.train()
-
-      final = time.time()
-      print( "Setup time : "+ str((setup-start)/(final-start)) + ", "+ str( (setup-start)*1000 )+"milliseconds" )
-      print( "Loop time : "+ str((setup2-setup)/(final-start)) + ", "+ str( (setup2-setup)*1000 )+"milliseconds" )
-      print( "Fade time : "+ str((final-setup2)/(final-start)) + ", "+ str( (final-setup2)*1000 )+"milliseconds" )
-      print( "Total time : "+ str(final-start) + ", "+ str( (final-start)*1000 )+"milliseconds" )
-      print( "Rate : "+str( seq_len/(final-start) )+"Hz" )
+      
+      
       return output
 
+    # def get_gru_cell( self, gru ):
+    #   gru_cell = nn.GRUCell(gru.input_size, gru.hidden_size)
+    #   gru_cell.weight_hh.data = gru.weight_hh_l0.data
+    #   gru_cell.weight_ih.data = gru.weight_ih_l0.data
+    #   gru_cell.bias_hh.data = gru.bias_hh_l0.data
+    #   gru_cell.bias_ih.data = gru.bias_ih_l0.data
+    #   return gru_cell
 
-    def generate_from_mel(self, mel, batched, overlap, target, mu_law=False, cpu=False, apply_preemphasis=False,  progress_callback=None):
-        mels = torch.from_numpy( np.array([ mel ]) )
-        mu_law = mu_law if self.mode == 'RAW' else False
-        progress_callback = progress_callback or self.gen_display
-
-        self.eval()
-        output = []
-        start = time.time()
-        rnn1 = self.get_gru_cell(self.rnn1)
-        rnn2 = self.get_gru_cell(self.rnn2)
-
-        with torch.no_grad():
-            if cpu is False:
-                mels = mels.cuda()
-            wave_len = (mels.size(-1) - 1) * self.hop_length
-            mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, cpu=cpu, side='both')
-            mels, aux = self.upsample(mels.transpose(1, 2))
-
-            if batched:
-                mels = self.fold_with_overlap(mels, target, overlap, cpu)
-                aux = self.fold_with_overlap(aux, target, overlap, cpu)
-
-            b_size, seq_len, _ = mels.size()
-
-            if cpu is False:
-                h1 = torch.zeros(b_size, self.rnn_dims).cuda()
-                h2 = torch.zeros(b_size, self.rnn_dims).cuda()
-                x = torch.zeros(b_size, 1).cuda()
-            else:
-                h1 = torch.zeros(b_size, self.rnn_dims)
-                h2 = torch.zeros(b_size, self.rnn_dims)
-                x = torch.zeros(b_size, 1)
-
-            d = self.aux_dims
-            aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
-
-            for i in range(seq_len):
-
-                m_t = mels[:, i, :]
-
-                a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
-
-                x = torch.cat([x, m_t, a1_t], dim=1)
-                x = self.I(x)
-                h1 = rnn1(x, h1)
-
-                x = x + h1
-                inp = torch.cat([x, a2_t], dim=1)
-                h2 = rnn2(inp, h2)
-
-                x = x + h2
-                x = torch.cat([x, a3_t], dim=1)
-                x = F.relu(self.fc1(x))
-
-                x = torch.cat([x, a4_t], dim=1)
-                x = F.relu(self.fc2(x))
-
-                logits = self.fc3(x)
-
-                if self.mode == 'MOL':
-                    b = logits.unsqueeze(0).transpose(1, 2)
-                    sample = sample_from_discretized_mix_logistic( b )
-                    output.append(sample.view(-1))
-                    # x = torch.FloatTensor([[sample]]).cuda()
-                    if cpu is False:
-                        x = sample.transpose(0, 1).cuda()
-                    else:
-                        x = sample.transpose(0, 1)
-
-                elif self.mode == 'RAW' :
-                    posterior = F.softmax(logits, dim=1)
-                    distrib = torch.distributions.Categorical(posterior)
-
-                    sample = 2 * distrib.sample().float() / (self.n_classes - 1.) - 1.
-                    output.append(sample)
-                    x = sample.unsqueeze(-1)
-                else:
-                    raise RuntimeError("Unknown model mode value - ", self.mode)
-
-                if i % 100 == 0:
-                    gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
-                    progress_callback(i, seq_len, b_size, gen_rate)
-
-        output = torch.stack(output).transpose(0, 1)
-        if cpu is False:
-            output = output.cpu().numpy().astype(np.float64)
-        else:
-            output = output.numpy().astype(np.float64)
+    def pad_tensor_after(self, x, pad: int):
+        b, t, c = x.size()
+        total = t + pad
+        padded = torch.zeros(b, total, c).cuda()
+        padded[:, :t, :] = x
         
-        if batched:
-            output = self.xfade_and_unfold(output, target, overlap)
-        else:
-            output = output[0]
+        return padded
 
-        if mu_law:
-            output = decode_mu_law(output, self.n_classes, False)
-        if apply_preemphasis:
-            output = de_emphasis(output)
-
-        # Fade-out at the end to avoid signal cutting out suddenly
-        fade_out = np.linspace(1, 0, 10 * self.hop_length)
-        output = output[:wave_len]
-        output[-10 * self.hop_length:] *= fade_out
-        
-        self.train()
-        return output
-
-
-    def gen_display(self, i, seq_len, b_size, gen_rate):
-        pbar = progbar(i, seq_len)
-        msg = f'| {pbar} {i*b_size}/{seq_len*b_size} | Batch Size: {b_size} | Gen Rate: {gen_rate:.1f}kHz | '
-        stream(msg)
-
-  
-    def get_gru_cell(self, gru):
-        gru_cell = nn.GRUCell(gru.input_size, gru.hidden_size)
-        gru_cell.weight_hh.data = gru.weight_hh_l0.data
-        gru_cell.weight_ih.data = gru.weight_ih_l0.data
-        gru_cell.bias_hh.data = gru.bias_hh_l0.data
-        gru_cell.bias_ih.data = gru.bias_ih_l0.data
-        return gru_cell
-
-    def pad_tensor(self, x, pad, cpu=False, side='both'):
+    def pad_tensor(self, x, pad: int):
         # NB - this is just a quick method i need right now
         # i.e., it won't generalise to other shapes/dims
         b, t, c = x.size()
-        total = t + 2 * pad if side == 'both' else t + pad
-        if cpu is False:
-            padded = torch.zeros(b, total, c).cuda()
-        else:
-            padded = torch.zeros(b, total, c)
-        if side == 'before' or side == 'both':
-            padded[:, pad:pad + t, :] = x
-        elif side == 'after':
-            padded[:, :t, :] = x
+        total = t + 2 * pad
+        padded = torch.zeros(b, total, c).cuda()
+        padded[:, pad:pad + t, :] = x
+        
         return padded
 
     def fold_with_overlap(self, x, target, overlap, cpu=False):
@@ -573,7 +315,7 @@ class WaveRNN(nn.Module):
         if remaining != 0:
             num_folds += 1
             padding = target + 2 * overlap - remaining
-            x = self.pad_tensor(x, padding, cpu=cpu, side='after')
+            x = self.pad_tensor_after(x, padding)
 
         if cpu is False:
             folded = torch.zeros(num_folds, target + 2 * overlap, features).cuda()
