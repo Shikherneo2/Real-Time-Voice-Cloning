@@ -5,8 +5,6 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
-# sys.path.append("D:\Voice\Real-Time-Voice-Cloning")
-
 from vocoder.distribution import sample_from_discretized_mix_logistic
 from vocoder.display import *
 from vocoder.audio import *
@@ -14,64 +12,6 @@ from vocoder.audio import *
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-# feat_dims = 80
-# fc_dims = 512
-# rnn_dims = 512
-# aux_dims = 128 // 4
-# n_classes = 30
-
-# I = nn.Linear(feat_dims + aux_dims + 1, rnn_dims)
-# rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
-# rnn2 = nn.GRU(rnn_dims + aux_dims, rnn_dims, batch_first=True)
-# fc1 = nn.Linear(rnn_dims + aux_dims, fc_dims)
-# fc2 = nn.Linear(fc_dims + aux_dims, fc_dims)
-# fc3 = nn.Linear(fc_dims, n_classes)
-
-
-@torch.jit.script
-def sample_from_discretized_mix_logistic( y ):
-  """
-  Sample from discretized mixture of logistic distributions
-  Args:
-      y (Tensor): B x C x T
-      log_scale_min (float): Log scale minimum value
-  Returns:
-      Tensor: sample in range of [-1, 1].
-  """
-  nr_mix = y.size(1) // 3
-
-  # B x T x C
-  y = y.transpose(1, 2)
-  logit_probs = y[:, :, :nr_mix]
-
-  # sample mixture indicator from softmax
-  temp = torch.zeros(logit_probs.size(), dtype=logit_probs.data.dtype).uniform_(1e-5, 1.0 - 1e-5)
-  if logit_probs.is_cuda:
-    temp = temp.cuda()
-  temp = logit_probs.data - torch.log(- torch.log(temp))
-  _, argmax = temp.max(dim=-1)
-
-  # (B, T) -> (B, T, nr_mix)
-  one_hot = torch.zeros(argmax.size() + (nr_mix,), dtype=torch.float32)
-  if argmax.is_cuda:
-      one_hot = one_hot.cuda()
-  one_hot.scatter_(len(argmax.size()), argmax.unsqueeze(-1), 1)
-  
-  # select logistic parameters
-  means = torch.sum(y[:, :, nr_mix:2 * nr_mix] * one_hot, dim=-1)
-  
-  vv = torch.sum(y[:, :, 2 * nr_mix:3 * nr_mix] * one_hot, dim=-1)
-  log_scales = torch.clamp(vv, min=-32.23619130191664)
-  
-  # sample from logistic & clip to interval
-  # we don't actually round to the nearest 8bit value when sampling
-  u = torch.zeros( means.size(), dtype=means.data.dtype ).uniform_(1e-5, 1.0 - 1e-5).cuda()
-  x = means + torch.exp(log_scales) * (torch.log(u) - torch.log(1. - u))
-
-  x = torch.clamp(torch.clamp(x, min=-1.), max=1.)
-
-  return x
 
 
 class ResBlock(nn.Module):
@@ -147,9 +87,7 @@ class Stretch256(nn.Module):
 class UpsampleNetwork(nn.Module):
     def __init__(self, feat_dims, upsample_scales, compute_dims,
                  res_blocks, res_out_dims, pad):
-        super().__init__()
-        # total_scale: UpsampleNetwork
-        # resnet_stretch: UpsampleNetwork
+        super( UpsampleNetwork, self ).__init__()
         self.total_scale = np.cumproduct(upsample_scales)[-1]
         self.indent = pad * self.total_scale
         self.resnet = MelResNet(res_blocks, feat_dims, compute_dims, res_out_dims, pad)
@@ -192,6 +130,7 @@ class UpsampleNetwork(nn.Module):
         m = m.squeeze(1)[:, :, 512:-512]
         return m.transpose(1, 2), aux.transpose(1, 2)
 
+
 class WaveRNN(nn.Module):
     def __init__(self, rnn_dims, fc_dims, bits, pad: int, upsample_factors,
                  feat_dims, compute_dims, res_out_dims, res_blocks,
@@ -205,110 +144,99 @@ class WaveRNN(nn.Module):
         self.hop_length = hop_length
         self.sample_rate = sample_rate
 
-        self.upsample =  UpsampleNetwork(feat_dims, upsample_factors, compute_dims, res_blocks, res_out_dims, pad)
+        self.upsample = UpsampleNetwork(feat_dims, upsample_factors, compute_dims, res_blocks, res_out_dims, pad)
+        
         self.I = torch.jit.trace( nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims), example_inputs=torch.rand(1, 2, feat_dims+self.aux_dims+1) )
-        self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
-        self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
         self.fc1 = torch.jit.trace( nn.Linear(rnn_dims + self.aux_dims, fc_dims), example_inputs=torch.rand(1, 2, rnn_dims+self.aux_dims) )
         self.fc2 = torch.jit.trace( nn.Linear(fc_dims + self.aux_dims, fc_dims), example_inputs=torch.rand(1, 2, fc_dims+self.aux_dims) )
         self.fc3 = torch.jit.trace( nn.Linear(fc_dims, self.n_classes), example_inputs=torch.rand(1, 2, fc_dims) )
+        
+        # self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
+        # self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
+        # self.fc2 = nn.Linear(fc_dims + self.aux_dims, fc_dims)
+        # self.fc3 = nn.Linear(fc_dims, self.n_classes)
+        self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
+        self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
         
         self.gru_cell1 = torch.nn.GRUCell(self.rnn1.input_size, self.rnn1.hidden_size, bias=True)
         self.gru_cell1.weight_hh.data = self.rnn1.weight_hh_l0.data
         self.gru_cell1.weight_ih.data = self.rnn1.weight_ih_l0.data
         self.gru_cell1.bias_hh.data = self.rnn1.bias_hh_l0.data
         self.gru_cell1.bias_ih.data = self.rnn1.bias_ih_l0.data
-        self.gru_cell1 = torch.jit.trace( self.gru_cell1, example_inputs=(torch.rand(1, self.rnn1.input_size), torch.zeros(1, rnn_dims))  )
+        # self.gru_cell1 = torch.jit.trace( self.gru_cell1, example_inputs=(torch.rand(1, self.rnn1.input_size), torch.zeros(1, rnn_dims))  )
 
         self.gru_cell2 = torch.nn.GRUCell(self.rnn2.input_size, self.rnn2.hidden_size)
         self.gru_cell2.weight_hh.data = self.rnn2.weight_hh_l0.data
         self.gru_cell2.weight_ih.data = self.rnn2.weight_ih_l0.data
         self.gru_cell2.bias_hh.data = self.rnn2.bias_hh_l0.data
         self.gru_cell2.bias_ih.data = self.rnn2.bias_ih_l0.data
-        self.gru_cell2 = torch.jit.trace( self.gru_cell2, example_inputs=(torch.rand(1, self.rnn2.input_size), torch.zeros(1, rnn_dims))  )
+        # self.gru_cell2 = torch.jit.trace( self.gru_cell2, example_inputs=(torch.rand(1, self.rnn2.input_size), torch.zeros(1, rnn_dims))  )
         self.rnn1 = None
         self.rnn2 = None
         self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
         self.num_params()
 
-    @torch.no_grad()
+				# No grad does not work with PyTorch JIT
+        for param in self.parameters():
+          if param.requires_grad:
+            param.requires_grad = False
+
     def forward( self, mels ):
-      # self.eval()
-      # rnn1 = self.get_gru_cell(self.rnn1)
-      # rnn2 = self.get_gru_cell(self.rnn2)
+        mels = mels.cuda()
+        wave_len = (mels.size(-1) - 1) * self.hop_length
+        mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad)
+        mels, aux = self.upsample(mels.transpose(1, 2))
+
+        b_size, seq_len, _ = mels.size()
+
+        h1 = torch.zeros(b_size, self.rnn_dims).cuda()
+        h2 = torch.zeros(b_size, self.rnn_dims).cuda()
+        x = torch.zeros(b_size, 1).cuda()
+        d = self.aux_dims
+        aux_splits = []
+        aux_splits.append( aux[:, :, :d])
+        aux_splits.append( aux[:, :, d:d * 2])
+        aux_splits.append( aux[:, :, d * 2:d * 3])
+        aux_splits.append( aux[:, :, d * 3:d * 4])
         
-      mels = mels.cuda()
-      wave_len = (mels.size(-1) - 1) * self.hop_length
-      mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad)
-      mels, aux = self.upsample(mels.transpose(1, 2))
+        outputs = []
+        for i in range(seq_len):
+          m_t = mels[:, i, :]
 
-      b_size, seq_len, _ = mels.size()
+          a1_t = aux_splits[0][:, i, :]
+          a2_t = aux_splits[1][:, i, :]
+          a3_t = aux_splits[2][:, i, :]
+          a4_t = aux_splits[3][:, i, :]
+          x = torch.cat([x, m_t, a1_t], dim=1)
+          x = self.I(x)
+          h1 = self.gru_cell1(x, h1)
 
-      h1 = torch.zeros(b_size, self.rnn_dims).cuda()
-      h2 = torch.zeros(b_size, self.rnn_dims).cuda()
-      x = torch.zeros(b_size, 1).cuda()
-      d = self.aux_dims
-      aux_splits = []
-      aux_splits.append( aux[:, :, :d])
-      aux_splits.append( aux[:, :, d:d * 2])
-      aux_splits.append( aux[:, :, d * 2:d * 3])
-      aux_splits.append( aux[:, :, d * 3:d * 4])
-      
-      outputs = []
-      for i in range(seq_len):
-        m_t = mels[:, i, :]
+          x = x + h1
+          inp = torch.cat([x, a2_t], dim=1)
+          h2 = self.gru_cell2(inp, h2)
 
-        a1_t = aux_splits[0][:, i, :]
-        a2_t = aux_splits[1][:, i, :]
-        a3_t = aux_splits[2][:, i, :]
-        a4_t = aux_splits[3][:, i, :]
-        x = torch.cat([x, m_t, a1_t], dim=1)
-        x = self.I(x)
-        h1 = self.gru_cell1(x, h1)
+          x = x + h2
+          x = torch.cat([x, a3_t], dim=1)
+          x = torch.nn.functional.relu(self.fc1(x))
 
-        x = x + h1
-        inp = torch.cat([x, a2_t], dim=1)
-        h2 = self.gru_cell2(inp, h2)
+          x = torch.cat([x, a4_t], dim=1)
+          x = torch.nn.functional.relu(self.fc2(x))
 
-        x = x + h2
-        x = torch.cat([x, a3_t], dim=1)
-        x = torch.nn.functional.relu(self.fc1(x))
+          logits = self.fc3(x)
 
-        x = torch.cat([x, a4_t], dim=1)
-        x = torch.nn.functional.relu(self.fc2(x))
+          b = logits.unsqueeze(0).transpose(1, 2)
+          
+          assert b.size(1) % 3 == 0
+          sample = self.sample_from_discretized_mix_logistic( b )
+          output = sample.view(-1)
+          
+          x = sample.transpose(0, 1).cuda()
+          outputs.append(output)
 
-        logits = self.fc3(x)
+        wav = torch.stack(outputs).transpose(0, 1)
+        return wav
 
-        b = logits.unsqueeze(0).transpose(1, 2)
-        
-        assert b.size(1) % 3 == 0
-        sample = self.sample_from_discretized_mix_logistic( b )
-        output = sample.view(-1)
-        
-        x = sample.transpose(0, 1).cuda()
-        outputs.append(output)
 
-      output = torch.stack(outputs).transpose(0, 1)
-      #output = output.cpu().numpy().astype(np.float64)
-      
-      #output = output[0]
-
-      # Fade-out at the end to avoid signal cutting out suddenly
-      #fade_out = np.linspace(1, 0, 10 * self.hop_length)
-      #output = output[:wave_len]
-      #output[-10 * self.hop_length:] *= fade_out
-      
-      
-      
-      return output, wave_len
-
-    # def get_gru_cell( self, gru ):
-    #   gru_cell = nn.GRUCell(gru.input_size, gru.hidden_size)
-    #   gru_cell.weight_hh.data = gru.weight_hh_l0.data
-    #   gru_cell.weight_ih.data = gru.weight_ih_l0.data
-    #   gru_cell.bias_hh.data = gru.bias_hh_l0.data
-    #   gru_cell.bias_ih.data = gru.bias_ih_l0.data
-    #   return gru_cell
     @torch.jit.export
     def sample_from_discretized_mix_logistic( self, y ):
       nr_mix = y.size(1) // 3

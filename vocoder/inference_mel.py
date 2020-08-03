@@ -16,9 +16,8 @@ path = "/home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments/fifth_run_new_g
 mel_dir = sys.argv[1]
 output_dir = sys.argv[2]
 files = os.listdir( mel_dir )
-files = [sorted([ os.path.join(mel_dir,i) for i in files if i[-3:]=="npy"])[3]]
+files = sorted([ os.path.join(mel_dir,i) for i in files if i[-3:]=="npy"])[3:6]
 
-# @torch.jit.script
 model = WaveRNN(
         rnn_dims=hp.voc_rnn_dims,
         fc_dims=hp.voc_fc_dims,
@@ -32,28 +31,31 @@ model = WaveRNN(
         hop_length=hp.hop_length,
         sample_rate=hp.sample_rate,
 ).cuda()
-#model = torch.jit.trace( model )
-model.load_for_infer( path )
 
+torch.no_grad()
+model.load_for_infer( path )
+model.eval()
 model = torch.jit.script(model)
 
 for file in files:
   mel = np.load(file).T
-  #best performing -- 11000,550
+  print(mel.shape)
+  wav_length = (mel.shape[-1] - 1) * 256
   mel = torch.from_numpy( np.array([mel]) )
-  # wav = model.generate_from_mel( mel, batched=False, overlap=100, target=5000, mu_law=True, cpu=use_cpu, apply_preemphasis=False )
   start = time.time()
-  output, wav_len = model( mel )
+  # wav = model.generate_from_mel( mel, batched=False, overlap=100, target=5000, mu_law=True, cpu=use_cpu, apply_preemphasis=False )
+  output = model( mel )
   final = time.time()
+  
   print( "Total time : "+ str(final-start) + ", "+ str( round((final-start)*1000, 5))+" milliseconds" )
-  print( "Rate : "+str( wav_len/(final-start)[:7] )+"Hz" )
-  output = output.cpu().detach().numpy().astype(np.float64)
+  print( "Rate : "+str( wav_length/(final-start) )[:7]+"Hz" )
 
+  output = output.detach().cpu().numpy().astype(np.float64)
   output = output[0]
 
-        # Fade-out at the end to avoid signal cutting out suddenly
+  # Fade-out at the end to avoid signal cutting out suddenly
   fade_out = np.linspace(1, 0, 10 * 256)
-  output = output[:wav_len]
+  output = output[:wav_length]
   output[-10 * 256:] *= fade_out
 
   #final = time.time()
