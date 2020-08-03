@@ -192,11 +192,13 @@ class UpsampleNetwork(nn.Module):
         m = m.squeeze(1)[:, :, 512:-512]
         return m.transpose(1, 2), aux.transpose(1, 2)
 
+
 class WaveRNN(nn.Module):
     def __init__(self, rnn_dims, fc_dims, bits, pad: int, upsample_factors,
                  feat_dims, compute_dims, res_out_dims, res_blocks,
                  hop_length, sample_rate):
         super( WaveRNN, self).__init__()
+        #super( WaveRNN ).__init__()
         self.pad = pad
         self.n_classes = 30
         self.training = False
@@ -205,29 +207,26 @@ class WaveRNN(nn.Module):
         self.hop_length = hop_length
         self.sample_rate = sample_rate
 
-        self.upsample =  UpsampleNetwork(feat_dims, upsample_factors, compute_dims, res_blocks, res_out_dims, pad)
-        self.I = torch.jit.trace( nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims), example_inputs=torch.rand(1, 2, feat_dims+self.aux_dims+1) )
+        self.upsample = torch.jit.script( UpsampleNetwork(feat_dims, upsample_factors, compute_dims, res_blocks, res_out_dims, pad) )
+        self.I = torch.jit.script( nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims) )
         self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
         self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
-        self.fc1 = torch.jit.trace( nn.Linear(rnn_dims + self.aux_dims, fc_dims), example_inputs=torch.rand(1, 2, rnn_dims+self.aux_dims) )
-        self.fc2 = torch.jit.trace( nn.Linear(fc_dims + self.aux_dims, fc_dims), example_inputs=torch.rand(1, 2, fc_dims+self.aux_dims) )
-        self.fc3 = torch.jit.trace( nn.Linear(fc_dims, self.n_classes), example_inputs=torch.rand(1, 2, fc_dims) )
+        self.fc1 = torch.jit.script( nn.Linear(rnn_dims + self.aux_dims, fc_dims) )
+        self.fc2 = torch.jit.script( nn.Linear(fc_dims + self.aux_dims, fc_dims) )
+        self.fc3 = torch.jit.script( nn.Linear(fc_dims, self.n_classes))
         
         self.gru_cell1 = torch.nn.GRUCell(self.rnn1.input_size, self.rnn1.hidden_size, bias=True)
         self.gru_cell1.weight_hh.data = self.rnn1.weight_hh_l0.data
         self.gru_cell1.weight_ih.data = self.rnn1.weight_ih_l0.data
         self.gru_cell1.bias_hh.data = self.rnn1.bias_hh_l0.data
         self.gru_cell1.bias_ih.data = self.rnn1.bias_ih_l0.data
-        self.gru_cell1 = torch.jit.trace( self.gru_cell1, example_inputs=(torch.rand(1, self.rnn1.input_size), torch.zeros(1, rnn_dims))  )
 
-        self.gru_cell2 = torch.nn.GRUCell(self.rnn2.input_size, self.rnn2.hidden_size)
+        self.gru_cell2 = nn.GRUCell(self.rnn2.input_size, self.rnn2.hidden_size)
         self.gru_cell2.weight_hh.data = self.rnn2.weight_hh_l0.data
         self.gru_cell2.weight_ih.data = self.rnn2.weight_ih_l0.data
         self.gru_cell2.bias_hh.data = self.rnn2.bias_hh_l0.data
         self.gru_cell2.bias_ih.data = self.rnn2.bias_ih_l0.data
-        self.gru_cell2 = torch.jit.trace( self.gru_cell2, example_inputs=(torch.rand(1, self.rnn2.input_size), torch.zeros(1, rnn_dims))  )
-        self.rnn1 = None
-        self.rnn2 = None
+
         self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
         self.num_params()
 
@@ -309,7 +308,6 @@ class WaveRNN(nn.Module):
     #   gru_cell.bias_hh.data = gru.bias_hh_l0.data
     #   gru_cell.bias_ih.data = gru.bias_ih_l0.data
     #   return gru_cell
-    @torch.jit.export
     def sample_from_discretized_mix_logistic( self, y ):
       nr_mix = y.size(1) // 3
 
@@ -318,9 +316,9 @@ class WaveRNN(nn.Module):
       logit_probs = y[:, :, :nr_mix]
 
       # sample mixture indicator from softmax
-      temp = torch.zeros(logit_probs.size(), dtype=logit_probs.data.dtype)
-      temp = temp.cuda()
-      temp = temp.uniform_(1e-5, 1.0 - 1e-5)
+      temp = torch.zeros(logit_probs.size(), dtype=logit_probs.data.dtype).uniform_(1e-5, 1.0 - 1e-5)
+      if logit_probs.is_cuda:
+        temp = temp.cuda()
       temp = logit_probs.data - torch.log(- torch.log(temp))
       _, argmax = temp.max(dim=-1)
 
@@ -338,8 +336,7 @@ class WaveRNN(nn.Module):
 
       # sample from logistic & clip to interval
       # we don't actually round to the nearest 8bit value when sampling
-      u = torch.zeros( means.size(), dtype=means.data.dtype ).cuda()
-      u = u.uniform_(1e-5, 1.0 - 1e-5)
+      u = torch.zeros( means.size(), dtype=means.data.dtype ).uniform_(1e-5, 1.0 - 1e-5).cuda()
       x = means + torch.exp(log_scales) * (torch.log(u) - torch.log(1. - u))
 
       x = torch.clamp(torch.clamp(x, min=-1.), max=1.)

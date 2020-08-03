@@ -15,6 +15,7 @@ torch.backends.cudnn.enabled = True
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+@torch.jit.script
 def sample_from_discretized_mix_logistic( y ):
   """
   Sample from discretized mixture of logistic distributions
@@ -140,7 +141,7 @@ class UpsampleNetwork(nn.Module):
 class WaveRNN(nn.Module):
     def __init__(self, rnn_dims, fc_dims, bits, pad, upsample_factors,
                  feat_dims, compute_dims, res_out_dims, res_blocks,
-                 hop_length, sample_rate, mode='RAW'):
+                 hop_length, sample_rate, mode='MOL'):
         super().__init__()
         self.mode = mode
         self.pad = pad
@@ -361,7 +362,7 @@ class WaveRNN(nn.Module):
             wave_len = (mels.size(-1) - 1) * self.hop_length
             mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, cpu=cpu, side='both')
             mels, aux = self.upsample(mels.transpose(1, 2))
-
+            
             if batched:
                 mels = self.fold_with_overlap(mels, target, overlap, cpu)
                 aux = self.fold_with_overlap(aux, target, overlap, cpu)
@@ -385,7 +386,6 @@ class WaveRNN(nn.Module):
                 m_t = mels[:, i, :]
 
                 a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
-
                 x = torch.cat([x, m_t, a1_t], dim=1)
                 x = self.I(x)
                 h1 = rnn1(x, h1)
