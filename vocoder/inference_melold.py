@@ -4,8 +4,9 @@ import time
 import torch
 import numpy as np
 from librosa.output import write_wav
-from models.fatchord_versionold import WaveRNN
-
+from models.fatchord_version_subscale1 import WaveRNN
+#from models.fatchord_version import WaveRNN
+#from apex import amp
 import hparams as hp
 
 use_cpu = False
@@ -16,7 +17,7 @@ path = "/home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments/fifth_run_new_g
 mel_dir = sys.argv[1]
 output_dir = sys.argv[2]
 files = os.listdir( mel_dir )
-files = [sorted([ os.path.join(mel_dir,i) for i in files if i[-3:]=="npy"])[3]]
+files = [ os.path.join(mel_dir,i) for i in files if i[-3:]=="npy" if i.find("LJ")==-1]
 
 # @torch.jit.script
 model = WaveRNN(
@@ -35,19 +36,22 @@ model = WaveRNN(
 #model = torch.jit.script( model )
 
 model.load_for_infer( path )
+#model, _ = amp.initialize(model, [], opt_level="O3")
 
-for file in files:
-    mel = np.load(file).T
+for i in range(4):
+    print(files[1])
+    mel = np.load(files[i])[:,:200]
     #best performing -- 11000,550
     print(torch.backends.cudnn.enabled)
-    #mel = torch.from_numpy( np.array([ mel ]) )
+    mel = torch.from_numpy( np.array([ mel ]) )
     # wav = model.generate_from_mel( mel, batched=False, overlap=100, target=5000, mu_law=True, cpu=use_cpu, apply_preemphasis=False )
     start = time.time()
-    wav = model.generate_from_mel( mel,batched=False, overlap=100, target=5000 )
+    wav = model.generate_from_mel( mel, batched=False, overlap=100, target=5000 )
+    #wav = model(mel)
     final = time.time()
     seq_len = mel.shape[-1]*256
 
     print( "Total time : "+ str(final-start) + ", "+ str( (final-start)*1000 )+"milliseconds" )
     print( "Rate : "+str( seq_len/(final-start) )+"Hz" )
-    wav_path = os.path.join( output_dir, os.path.basename(file).replace(".npy","_990K.wav") )
+    wav_path = os.path.join( output_dir, os.path.basename(files[i]).replace(".npy","_990K.wav") )
     write_wav( wav_path, wav.astype(np.float32), sr=sampling_rate )

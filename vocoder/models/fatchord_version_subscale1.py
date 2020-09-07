@@ -5,12 +5,10 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
-#from sru import SRU
-# sys.path.append("D:\Voice\Real-Time-Voice-Cloning")
-
 from vocoder.distribution import sample_from_discretized_mix_logistic
 from vocoder.display import *
 from vocoder.audio import *
+#from sru import SRU
 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.deterministic = True
@@ -93,11 +91,12 @@ class MelResNet(nn.Module):
         x = self.conv_in(x)
         x = self.batch_norm(x)
         x = F.relu(x)
-        for f in self.layers: x = f(x)
+        for f in self.layers: 
+            x = f(x)
         x = self.conv_out(x)
         return x
 
-
+# Repeats the features scales times in the specified direction
 class Stretch2d(nn.Module):
     def __init__(self, x_scale, y_scale):
         super().__init__()
@@ -112,6 +111,9 @@ class Stretch2d(nn.Module):
 
 
 class UpsampleNetwork(nn.Module):
+    #feat_dims = num_mels=80
+    #compute_dims=128
+    #res_out_dims=128
     def __init__(self, feat_dims, upsample_scales, compute_dims,
                  res_blocks, res_out_dims, pad):
         super().__init__()
@@ -134,7 +136,8 @@ class UpsampleNetwork(nn.Module):
         aux = self.resnet_stretch(aux)
         aux = aux.squeeze(1)
         m = m.unsqueeze(1)
-        for f in self.up_layers: m = f(m)
+        for f in self.up_layers: 
+            m = f(m)
         m = m.squeeze(1)[:, :, self.indent:-self.indent]
         return m.transpose(1, 2), aux.transpose(1, 2)
 
@@ -162,8 +165,6 @@ class WaveRNN(nn.Module):
         self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
         self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
         self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
-        #self.rnn1 = SRU( input_size=rnn_dims, hidden_size=rnn_dims, num_layers = 2 )
-        #self.rnn2 = SRU( input_size=rnn_dims+self.aux_dims, hidden_size=rnn_dims, num_layers = 2)
         self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
         self.fc2 = nn.Linear(fc_dims + self.aux_dims, fc_dims)
         self.fc3 = nn.Linear(fc_dims, self.n_classes)
@@ -363,6 +364,7 @@ class WaveRNN(nn.Module):
         with torch.no_grad():
             if cpu is False:
                 mels = mels.cuda()
+            mel_len = mels.size(-1)
             wave_len = (mels.size(-1) - 1) * self.hop_length
             mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, cpu=cpu, side='both')
             mels, aux = self.upsample(mels.transpose(1, 2))
@@ -371,6 +373,23 @@ class WaveRNN(nn.Module):
             if batched:
                 mels = self.fold_with_overlap(mels, target, overlap, cpu)
                 aux = self.fold_with_overlap(aux, target, overlap, cpu)
+
+            inds = []
+            pieces = 16
+            piece_size = int( 256/pieces )
+            #for i in range(pieces):
+            #    inds.append([k for j in range( 0, mel_len) for k in range((j*256) +(i*piece_size), (j*256) +(i*piece_size)+piece_size)])
+            
+            #for i in range(10):
+            #    inds.append( [(i*2560)+j for j in range(2560)]  )
+            inds = [ [] for i in range(16) ]
+            for i in range(mels.size(1)):
+                inds[ i%16 ].append(i)
+
+            mels = torch.squeeze(mels[:,inds,:], 0)
+            aux = torch.squeeze(aux[:,inds,:], 0)
+            print(mels.shape)
+            print(aux.shape)
 
             b_size, seq_len, _ = mels.size()
 
@@ -387,7 +406,6 @@ class WaveRNN(nn.Module):
             aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
 
             for i in range(seq_len):
-
                 m_t = mels[:, i, :]
                 a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
                 x = torch.cat([x, m_t, a1_t], dim=1)
@@ -408,40 +426,50 @@ class WaveRNN(nn.Module):
 
                 logits = self.fc3(x)
 
-                if self.mode == 'MOL':
-                    b = logits.unsqueeze(0).transpose(1, 2)
-                    sample = sample_from_discretized_mix_logistic( b )
-                    output.append(sample.view(-1))
-                    # x = torch.FloatTensor([[sample]]).cuda()
-                    if cpu is False:
-                        x = sample.transpose(0, 1).cuda()
-                    else:
-                        x = sample.transpose(0, 1)
-
-                elif self.mode == 'RAW' :
-                    posterior = F.softmax(logits, dim=1)
-                    distrib = torch.distributions.Categorical(posterior)
-
-                    sample = 2 * distrib.sample().float() / (self.n_classes - 1.) - 1.
-                    output.append(sample)
-                    x = sample.unsqueeze(-1)
+                b = logits.unsqueeze(0).transpose(1, 2)
+                sample = sample_from_discretized_mix_logistic( b )
+                output.append(sample.view(-1))
+                # x = torch.FloatTensor([[sample]]).cuda()
+                if cpu is False:
+                    x = sample.transpose(0, 1).cuda()
                 else:
-                    raise RuntimeError("Unknown model mode value - ", self.mode)
+                    x = sample.transpose(0, 1)
 
+                
+                #if (i+1)%piece_size==0:
+                    # tile these to batch_size
+                x = x[-1].repeat(pieces,1)
+                #x = torch.zeros(pieces, 1).cuda()
+                h1 = h1[-1].repeat(pieces,1)
+                h2 = h2[-1].repeat(pieces,1)
                 if i % 100 == 0:
                     gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
                     progress_callback(i, seq_len, b_size, gen_rate)
 
-        output = torch.stack(output).transpose(0, 1)
-        if cpu is False:
-            output = output.cpu().numpy().astype(np.float64)
-        else:
-            output = output.numpy().astype(np.float64)
         
-        if batched:
-            output = self.xfade_and_unfold(output, target, overlap)
+        output = torch.stack(output)
+        #print( "\n" )
+        #print( output.size() )
+        #output = output.flatten()
+        nn = []
+        print("\n")
+        #print(seq_len)
+        #print(pieces)
+        #print(len(output))
+        #for j2 in range(0, seq_len, piece_size):
+        #    for i2 in range(pieces):
+        #        nn.extend(output[i2][j2:j2+piece_size])
+        #print(len(nn))    
+        #output = np.array(nn, dtype=np.float64)
+        if cpu is False:
+            output = output.cpu().numpy().flatten().astype(np.float64)
         else:
-            output = output[0]
+            output = output.numpy().flatten().astype(np.float64)
+        
+        # if batched:
+            # output = self.xfade_and_unfold(output, target, overlap)
+        # else:
+            # output = output[0]
 
         if mu_law:
             output = decode_mu_law(output, self.n_classes, False)
@@ -449,9 +477,9 @@ class WaveRNN(nn.Module):
             output = de_emphasis(output)
 
         # Fade-out at the end to avoid signal cutting out suddenly
-        fade_out = np.linspace(1, 0, 10 * self.hop_length)
-        output = output[:wave_len]
-        output[-10 * self.hop_length:] *= fade_out
+        #fade_out = np.linspace(1, 0, 10 * self.hop_length)
+        #output = output[:wave_len]
+        #output[-10 * self.hop_length:] *= fade_out
         
         self.train()
         return output
@@ -643,3 +671,5 @@ class WaveRNN(nn.Module):
         parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
         if print_out :
             print('Trainable Parameters: %.3fM' % parameters)
+
+

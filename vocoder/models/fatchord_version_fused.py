@@ -12,12 +12,14 @@ from vocoder.distribution import sample_from_discretized_mix_logistic
 from vocoder.display import *
 from vocoder.audio import *
 
+import vocoder.models.custom_gru_mod_fused_matrices as custom_gru_mod
+
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 @torch.jit.script
-def sample_from_discretized_mix_logistic( y ):
+def sample_from_discretized_mix_logistic( y, temp_const, one_hot, u ):
   """
   Sample from discretized mixture of logistic distributions
   Args:
@@ -26,35 +28,26 @@ def sample_from_discretized_mix_logistic( y ):
   Returns:
       Tensor: sample in range of [-1, 1].
   """
-  nr_mix = y.size(1) // 3
+  nr_mix = 10
 
   # B x T x C
-  y = y.transpose(1, 2)
   logit_probs = y[:, :, :nr_mix]
 
   # sample mixture indicator from softmax
-  temp = torch.zeros(logit_probs.size(), dtype=torch.float32).uniform_(1e-5, 1.0 - 1e-5)
-  if logit_probs.is_cuda:
-    temp = temp.cuda()
-  temp = logit_probs.data - torch.log(- torch.log(temp))
+  temp = logit_probs.data - temp_const
   _, argmax = temp.max(dim=-1)
 
-  # (B, T) -> (B, T, nr_mix)
-  one_hot = torch.zeros(argmax.size() + (nr_mix,), dtype=torch.float32)
-  if argmax.is_cuda:
-      one_hot = one_hot.cuda()
   one_hot.scatter_(len(argmax.size()), argmax.unsqueeze(-1), 1)
-  
+
   # select logistic parameters
   means = torch.sum(y[:, :, nr_mix:2 * nr_mix] * one_hot, dim=-1)
   
-  vv = torch.sum(y[:, :, 2 * nr_mix:3 * nr_mix] * one_hot, dim=-1)
-  log_scales = torch.clamp(vv, min=-32.23619130191664)
+  log_scales = torch.clamp( torch.sum(y[:, :, 2 * nr_mix:3 * nr_mix] * one_hot, dim=-1), min=-32.23619130191664)
   
   # sample from logistic & clip to interval
   # we don't actually round to the nearest 8bit value when sampling
-  u = torch.zeros( means.size(), dtype=means.data.dtype ).uniform_(1e-5, 1.0 - 1e-5).cuda()
-  x = means + torch.exp(log_scales) * (torch.log(u) - torch.log(1. - u))
+  # u = torch.zeros( means.size(), dtype=means.data.dtype ).uniform_(1e-5, 1.0 - 1e-5).cuda()
+  x = means + torch.exp(log_scales) * u
 
   x = torch.clamp(torch.clamp(x, min=-1.), max=1.)
 
@@ -357,8 +350,7 @@ class WaveRNN(nn.Module):
         self.eval()
         output = []
         start = time.time()
-        rnn1 = self.get_gru_cell(self.rnn1)
-        rnn2 = self.get_gru_cell(self.rnn2)
+        fused_model = self.get_fused_model( )
 
         with torch.no_grad():
             if cpu is False:
@@ -373,6 +365,11 @@ class WaveRNN(nn.Module):
                 aux = self.fold_with_overlap(aux, target, overlap, cpu)
 
             b_size, seq_len, _ = mels.size()
+            nr_mix = self.n_classes//3
+            self.temp = torch.log(- torch.log( torch.zeros((b_size, 1, nr_mix), dtype=torch.float32).uniform_(1e-5, 1.0 - 1e-5).cuda() ))
+            self.one_hot = torch.zeros( (b_size,1, nr_mix), dtype=torch.float32 ).cuda()
+            u = torch.zeros( (b_size, 1), dtype=torch.float32 ).uniform_(1e-5, 1.0 - 1e-5).cuda()
+            self.u = (torch.log(u) - torch.log(1. - u))
 
             if cpu is False:
                 h1 = torch.zeros(b_size, self.rnn_dims, dtype=mels.dtype).cuda()
@@ -385,38 +382,22 @@ class WaveRNN(nn.Module):
 
             d = self.aux_dims
             aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
-
+            
+            print(seq_len)
             for i in range(seq_len):
 
                 m_t = mels[:, i, :]
                 a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
-                x = torch.cat([x, m_t, a1_t], dim=1)
                 
-                x = self.I(x)
-                h1 = rnn1(x, h1)
-
-                x = x + h1
-                inp = torch.cat([x, a2_t], dim=1)
-                h2 = rnn2(inp, h2)
-
-                x = x + h2
-                x = torch.cat([x, a3_t], dim=1)
-                x = F.relu(self.fc1(x))
-
-                x = torch.cat([x, a4_t], dim=1)
-                x = F.relu(self.fc2(x))
-
-                logits = self.fc3(x)
+                logits, h1, h2 = fused_model( x, h1, h2, m_t, a1_t, a2_t, a3_t, a4_t )
 
                 if self.mode == 'MOL':
-                    b = logits.unsqueeze(0).transpose(1, 2)
-                    sample = sample_from_discretized_mix_logistic( b )
+                    # b = logits.unsqueeze(0).transpose(1, 2)
+                    b = logits.unsqueeze(0)
+                    sample = sample_from_discretized_mix_logistic( b, self.temp, self.one_hot, self.u )
                     output.append(sample.view(-1))
                     # x = torch.FloatTensor([[sample]]).cuda()
-                    if cpu is False:
-                        x = sample.transpose(0, 1).cuda()
-                    else:
-                        x = sample.transpose(0, 1)
+                    if cpu is False:self.rnn1
 
                 elif self.mode == 'RAW' :
                     posterior = F.softmax(logits, dim=1)
@@ -443,15 +424,9 @@ class WaveRNN(nn.Module):
         else:
             output = output[0]
 
-        if mu_law:
-            output = decode_mu_law(output, self.n_classes, False)
-        if apply_preemphasis:
-            output = de_emphasis(output)
-
-        # Fade-out at the end to avoid signal cutting out suddenly
-        fade_out = np.linspace(1, 0, 10 * self.hop_length)
+        fade_out = np.linspace(1, 0, 20 * self.hop_length)
         output = output[:wave_len]
-        output[-10 * self.hop_length:] *= fade_out
+        output[-20 * self.hop_length:] *= fade_out
         
         self.train()
         return output
@@ -462,14 +437,28 @@ class WaveRNN(nn.Module):
         msg = f'| {pbar} {i*b_size}/{seq_len*b_size} | Batch Size: {b_size} | Gen Rate: {gen_rate:.1f}kHz | '
         stream(msg)
 
-  
-    def get_gru_cell(self, gru):
-        gru_cell = nn.GRUCell(gru.input_size, gru.hidden_size)
-        gru_cell.weight_hh.data = gru.weight_hh_l0.data
-        gru_cell.weight_ih.data = gru.weight_ih_l0.data
-        gru_cell.bias_hh.data = gru.bias_hh_l0.data
-        gru_cell.bias_ih.data = gru.bias_ih_l0.data
-        return gru_cell
+    def get_fused_model(self):
+        #print(self.rnn2.weight_hh_l0.data.shape)
+        #print(self.rnn2.weight_ih_l0.data.shape)
+        mod = custom_gru_mod.GRUCell(
+            self.rnn1.input_size, self.rnn1.hidden_size,
+            self.rnn1.weight_hh_l0.data,
+            self.rnn1.weight_ih_l0.data,
+            self.rnn1.bias_hh_l0.data,
+            self.rnn1.bias_ih_l0.data,
+
+            self.rnn2.weight_hh_l0.data,
+            self.rnn2.weight_ih_l0.data,
+            self.rnn2.bias_hh_l0.data,
+            self.rnn2.bias_ih_l0.data,
+            
+            (self.I.weight, self.I.bias),
+            (self.fc1.weight, self.fc1.bias),
+            (self.fc2.weight, self.fc2.bias),
+            (self.fc3.weight, self.fc3.bias),
+        )
+        print(mod.graph)
+        return mod
 
     def pad_tensor(self, x, pad, cpu=False, side='both'):
         # NB - this is just a quick method i need right now
@@ -534,11 +523,6 @@ class WaveRNN(nn.Module):
         for i in range(num_folds):
             start = i * (target + overlap)
             end = start + target + 2 * overlap
-            folded[i] = x[:, start:end, :]
-
-        return folded
-
-    def xfade_and_unfold(self, y, target, overlap):
 
         ''' Applies a crossfade and unfolds into a 1d array.
 
@@ -643,3 +627,5 @@ class WaveRNN(nn.Module):
         parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
         if print_out :
             print('Trainable Parameters: %.3fM' % parameters)
+
+
