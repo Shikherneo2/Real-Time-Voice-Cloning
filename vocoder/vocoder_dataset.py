@@ -27,7 +27,7 @@ class VocoderDataset(Dataset):
         
         # Load the mel spectrogram and adjust its range to [-1, 1]
         # mel = np.load(mel_path).T.astype(np.float32) / hp.mel_max_abs_value
-        mel = np.load(mel_path).astype(np.float32)
+        mel = np.load(mel_path).astype(np.float32)[:, :-10]
         wav = np.load(wav_path).astype(np.int64)
         # Load the wav
         # wav, _ = librosa.load( wav_path, 16000 )
@@ -42,9 +42,9 @@ class VocoderDataset(Dataset):
         # Fix for missing padding   # TODO: settle on whether this is any useful
         # r_pad =  (len(wav) // hp.hop_length + 1) * hp.hop_length - len(wav)
         # wav = np.pad(wav, (0, r_pad), mode='constant')
-        assert len(wav) >= mel.shape[1] * hp.hop_length
+        # assert len(wav) >= mel.shape[1] * hp.hop_length
         # wav = wav[:mel.shape[1] * hp.hop_length]
-        assert len(wav) % hp.hop_length == 0
+        # assert len(wav) % hp.hop_length == 0
         
         # Quantize the wav
         # if hp.voc_mode == 'RAW':
