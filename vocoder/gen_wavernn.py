@@ -31,18 +31,17 @@ def gen_testset(model: WaveRNN, test_set, samples, batched, target, overlap, sav
         wav = model.generate(m, batched, target, overlap, hp.mu_law, progress_callback=None)
         save_wav(wav, save_str)
 
-def gen_meltest( model: WaveRNN, batched, target, overlap, save_path ):
-	mel = []
-	mel.append( np.load("/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-1.npy").T )
-	mel.append( np.load("/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-3.npy").T )
-	mel.append( np.load("/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-5.npy").T )
+# def gen_meltest( model: WaveRNN, batched, target, overlap, save_path ):
+# 	mel = []
+# 	mel.append( np.load("/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-1.npy").T )
+# 	mel.append( np.load("/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-3.npy").T )
+# 	mel.append( np.load("/home/sdevgupta/mine/waveglow/outputs/waveglow_specs/mel-5.npy").T )
 	
-	k = model.get_step() // 1000
-	for i,m in enumerate(mel):
-		m = m - 20
-		m = audio_synth._normalize(m, hparams_synth.hparams)/4
-		wav = model.generate_from_mel( m, batched=False, overlap=hp.voc_overlap, target=hp.voc_target, mu_law=True, cpu=False, apply_preemphasis=False )
-		#wav = wav / np.abs(wav).max() * 0.9
-		save_str = save_path.joinpath( "mel-"+str(i+1)+"-steps-"+str(k)+"k.wav" )
-		save_wav(wav, save_str)
-
+# 	k = model.get_step() // 1000
+# 	for i,m in enumerate(mel):
+# 		m = m - 20
+# 		m = audio_synth._normalize(m, hparams_synth.hparams)/4
+# 		wav = model.generate_from_mel( m, batched=False, overlap=hp.voc_overlap, target=hp.voc_target, mu_law=True, cpu=False, apply_preemphasis=False )
+# 		#wav = wav / np.abs(wav).max() * 0.9
+# 		save_str = save_path.joinpath( "mel-"+str(i+1)+"-steps-"+str(k)+"k.wav" )
+# 		save_wav(wav, save_str)

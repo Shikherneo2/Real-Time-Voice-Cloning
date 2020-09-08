@@ -1,16 +1,16 @@
+import os
+import time
+import numpy as np
+from torch import optim
+from pathlib import Path
 from vocoder.models.fatchord_version import WaveRNN
 from vocoder.vocoder_dataset import VocoderDataset, collate_vocoder
 from vocoder.distribution import discretized_mix_logistic_loss
 from vocoder.display import stream, simple_table
 from vocoder.gen_wavernn import gen_testset, gen_meltest
 from torch.utils.data import DataLoader
-from pathlib import Path
-from torch import optim
 import torch.nn.functional as F
 import vocoder.hparams as hp
-import numpy as np
-import time
-import os
 from tensorboardX import SummaryWriter
 
 
@@ -69,8 +69,8 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
                   ('LR', hp.voc_lr),
                   ('Sequence Len', hp.voc_seq_len)])
 
-    epoch_start = int( (model.step-428000)*110/dataset.get_number_of_samples() )
-    epoch_end = 200
+    epoch_start = 0
+    epoch_end = 1000
     
     log_path = os.path.join( models_dir, "logs" )
     if not os.path.isdir(log_path):
@@ -79,13 +79,13 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
     writer = SummaryWriter( log_path )
     print("Log path : " + log_path)
 
-    print("Starting from epoch: "+str(epoch_start))
+    print("Starting from epoch: " + str(epoch_start))
 
     for epoch in range(epoch_start, epoch_start+epoch_end):
         data_loader = DataLoader(dataset,
                                  collate_fn=collate_vocoder,
                                  batch_size=hp.voc_batch_size,
-                                 num_workers=2,
+                                 num_workers=3,
                                  shuffle=True,
                                  pin_memory=True)
         start = time.time()
@@ -128,6 +128,6 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
                     f"steps/s | Step: {k}k | "
                 print(msg, flush=True)
 
-            if step%15000 == 0:
+            if step%5000 == 0:
                 gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
                 gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )
