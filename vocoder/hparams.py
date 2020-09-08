@@ -1,19 +1,16 @@
-from synthesizer.hparams import hparams as _syn_hp
-
-
 # Audio settings------------------------------------------------------------------------
 # Match the values of the synthesizer
-sample_rate = _syn_hp.sample_rate
-n_fft = _syn_hp.n_fft
-num_mels = _syn_hp.num_mels
-hop_length = _syn_hp.hop_size
-win_length = _syn_hp.win_size
-fmin = _syn_hp.fmin
-min_level_db = _syn_hp.min_level_db
-ref_level_db = _syn_hp.ref_level_db
-mel_max_abs_value = _syn_hp.max_abs_value
-preemphasis = _syn_hp.preemphasis
-apply_preemphasis = _syn_hp.preemphasize
+sample_rate = 22050
+n_fft = 1024
+num_mels = 80
+hop_length = 256
+win_length = 1024
+fmin = 55
+min_level_db = -100
+ref_level_db = 20
+mel_max_abs_value = 4.
+preemphasis = 0.97
+apply_preemphasis = False
 
 # bit depth of signal - only applicable if mode is RAW
 bits = 11
