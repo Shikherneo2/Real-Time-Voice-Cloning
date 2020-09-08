@@ -15,13 +15,16 @@ def gen_testset(model: WaveRNN, test_set, samples, batched, target, overlap, sav
 
         x = x[0].numpy()
 
-        bits = 16 if hp.voc_mode == 'MOL' else hp.bits
+        # bits = 16 if hp.voc_mode == 'MOL' else hp.bits
 
-        if hp.mu_law and hp.voc_mode != 'MOL' :
-            x = decode_mu_law(x, 2**bits, from_labels=True)
-        else :
-            x = label_2_float(x, bits)
-
+        # if hp.mu_law and hp.voc_mode != 'MOL' :
+        #     x = decode_mu_law(x, 2**bits, from_labels=True)
+        # else :
+        #     x = label_2_float(x, bits)
+        x1 = float_2_label(x, 16)
+        x2 = label_2_float(x, 16)
+        save_wav(x1, save_path.joinpath("%dk_steps_%d_target_float_2_label.wav" % (k, i)))
+        save_wav(x2, save_path.joinpath("%dk_steps_%d_target_label_2_float.wav" % (k, i)))
         save_wav(x, save_path.joinpath("%dk_steps_%d_target.wav" % (k, i)))
         
         batch_str = "gen_batched_target%d_overlap%d" % (target, overlap) if batched else \
@@ -29,7 +32,11 @@ def gen_testset(model: WaveRNN, test_set, samples, batched, target, overlap, sav
         save_str = save_path.joinpath("%dk_steps_%d_%s.wav" % (k, i, batch_str))
 
         wav = model.generate(m, batched, target, overlap, hp.mu_law, progress_callback=None)
+        x1 = float_2_label(wav, 16)
+        x2 = label_2_float( wav, 16 )
         save_wav(wav, save_str)
+        save_wav(x1, save_str.replace(".wav","_float2label.wav"))
+        save_wav(x2, save_str.replace(".wav","_label2float.wav"))
 
 # def gen_meltest( model: WaveRNN, batched, target, overlap, save_path ):
 # 	mel = []

@@ -49,9 +49,7 @@ def get_speech_features_from_file(
     num_features].
   """
   # load audio signal
-  print("asdasd")
   signal, fs = librosa.core.load(filename, sr=fs1)
-  print("asdasd")
   if hop_length is None:
     hop_length = int(n_fft / 4)
   if trim:
