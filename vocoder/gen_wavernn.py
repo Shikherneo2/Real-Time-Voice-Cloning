@@ -1,6 +1,7 @@
 from vocoder.models.fatchord_version import  WaveRNN
 from vocoder.audio import *
 import vocoder.hparams as hp
+import scipy.io.wavfile
 from synthesizer import audio as audio_synth, hparams as hparams_synth
 
 
