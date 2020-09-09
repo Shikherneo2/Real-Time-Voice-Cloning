@@ -1,5 +1,4 @@
 # Audio settings------------------------------------------------------------------------
-# Match the values of the synthesizer
 sample_rate = 22050
 n_fft = 1024
 num_mels = 80
@@ -16,7 +15,6 @@ apply_preemphasis = False
 bits = 11
 # Recommended to suppress noise if using raw bits in hp.voc_mode below
 mu_law = False
-
 
 # WAVERNN / VOCODER --------------------------------------------------------------------------------
 # either 'RAW' (softmax on raw bits) or 'MOL' (sample from mixture of logistics)

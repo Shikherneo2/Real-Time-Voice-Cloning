@@ -158,14 +158,20 @@ class WaveRNN(nn.Module):
         a4 = aux[:, :, aux_idx[3]:aux_idx[4]]
 
         x = x.reshape( bsize, -1, self.scale_factor )
+        # 70, 80, 16
         _,b,_ = x.size()
-        x = self.condition_samples( x.reshape( bsize*b, -1 ) )
-        x = x.reshape( bsize, b, -1 )
-        x = x.repeat( 1, self.scale_factor, 1 )
-        x = x.reshape( scaled_bsize, -1 )
-        # x = x.transpose(2,1)
 
-        x = torch.cat([x.unsqueeze(-1), mels, a1], dim=2)
+
+        x = self.condition_samples( x.reshape( bsize*b, -1 ).unsqueeze(1) )
+        x = x.reshape( bsize, b, -1 )
+        # torch.Size([70, 80, 66])
+        x = x.unsqueeze(1).repeat( 1, self.scale_factor, 1, 1 )
+        x = x.reshape( scaled_bsize, b, -1 )
+
+        # x = x.transpose(2,1)
+        # 70, 16, 80, 80
+        # torch.Size([1120, 80, 80])
+        x = torch.cat([x, mels, a1], dim=2)
         x = self.I(x)
         res = x
         x, _ = self.rnn1(x, h1)
@@ -256,10 +262,10 @@ class WaveRNN(nn.Module):
                 # Sample from discretized mixed logistic
                 sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
                 output.append(sample.view(-1))
-                x = sample.cuda()
+                x = sample.unsqueeze(0).cuda()
                 # x = sample.transpose(0, 1).cuda()
 
-                x = self.condition_samples( x )
+                x = self.condition_samples( x ).squeeze(0)
                 x = x.repeat(b_size, 1)
                 
                 if progress_callback is not None:

@@ -49,7 +49,7 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
 
     if force_restart:
         print("\nStarting the training of WaveRNN from scratch\n")
-        model.save(weights_fpath, optimizer)
+        # model.save(weights_fpath, optimizer)
     else:
         print("\nLoading weights at %s" % weights_fpath)
         model.load(weights_fpath, optimizer)
