@@ -190,10 +190,17 @@ class WaveRNN(nn.Module):
         x = self.fc3(x)
         
         po = x.size(-1)
-        #check!!
-        print(x.shape)
+        
+        # torch.Size([1120, 80, 30])
+        # torch.Size([70, 1280, 30])
+        # print(x.shape)
+        
+        # 70, 16, 80, 30 -> 70, 80, 16, 30
+        x = x.reshape(bsize, self.scale_factor, -1, 30).transpose(2,1).reshape(bsize, -1, po)
+
+        # 70, 16, 80*30 -> 70, 80*30, 16 -> 70,  ,30
         x = x.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
-        print(x.shape)
+        # print(x.shape)
         return x
 
 
