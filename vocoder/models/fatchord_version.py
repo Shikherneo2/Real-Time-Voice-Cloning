@@ -195,7 +195,7 @@ class WaveRNN(nn.Module):
         return x
 
 
-    def generate(self, mels, batched, target, overlap, mu_law, progress_callback=None):
+    def generate(self, mels, batched, target, overlap, mu_law, progress_callback=True):
         mu_law = mu_law if self.mode == 'RAW' else False
         if progress_callback is not None:
             progress_callback = self.gen_display
@@ -273,10 +273,14 @@ class WaveRNN(nn.Module):
                         gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
                         progress_callback(i, seq_len, b_size, gen_rate)
                     
-        output = torch.stack(output)
-        po = output.size(-1)
-        bsize = output.size(0)
-        output = output.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
+        output = torch.stack(output).squeeze()
+        # po = output.size(-1)
+        # bsize = output.size(0)
+        
+        # #  (7120, 1, 16)
+
+        # output = output.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
+        output = torch.flatten( output )
         output = output.cpu().numpy()
         output = output.astype(np.float64)
         
