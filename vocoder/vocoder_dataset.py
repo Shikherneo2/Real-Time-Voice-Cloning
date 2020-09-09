@@ -31,8 +31,8 @@ class VocoderDataset(Dataset):
         wav = np.load(wav_path)
         # Load the wav
         # wav, _ = librosa.load( wav_path, 16000 )
-        # rescaling_max=0.9
-        # wav = wav / np.abs(wav).max() * rescaling_max
+        rescaling_max=0.95
+        wav = wav / np.abs(wav).max() * rescaling_max
 
         # # sh_changes - Removed these wav filterings, as openseq2seq does not do them
         # # if hp.apply_preemphasis:
@@ -55,7 +55,7 @@ class VocoderDataset(Dataset):
         elif hp.voc_mode == 'MOL':
             quant = audio.float_2_label(wav, bits=16).astype(np.int64)
             
-        return mel, wav
+        return mel, quant
 
     def __len__(self):
         return len(self.samples_fpaths)

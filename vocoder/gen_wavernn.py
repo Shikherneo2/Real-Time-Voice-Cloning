@@ -22,13 +22,13 @@ def gen_testset(model: WaveRNN, test_set, samples, batched, target, overlap, sav
         # else :
         #     x = label_2_float(x, bits)
         x2 = label_2_float(x, 16)
-        save_wav(x2, save_path.joinpath("%dk_steps_%d_target_label_2_float.wav" % (k, i)))
+        scipy.io.wavfile.write( save_path.joinpath("%dk_steps_%d_target_label_2_float.wav" % (k, i)), 22050, x2)
         
         batch_str = "gen_batched_target%d_overlap%d" % (target, overlap) if batched else "gen_not_batched"
         save_str = save_path.joinpath("%dk_steps_%d_%s.wav" % (k, i, batch_str))
 
         wav = model.generate(m, batched, target, overlap, hp.mu_law, progress_callback=None)
-        save_wav(wav, save_str)
+        scipy.io.wavfile.write( save_str, 22050, wav)
 
 # def gen_meltest( model: WaveRNN, batched, target, overlap, save_path ):
 # 	mel = []
