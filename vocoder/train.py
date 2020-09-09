@@ -102,6 +102,7 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
             
             # Forward pass
             y_hat = model(x, m)
+            break
             if model.mode == 'RAW':
                 y_hat = y_hat.transpose(1, 2).unsqueeze(-1)
             elif model.mode == 'MOL':
@@ -134,6 +135,6 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
                     f"steps/s | Step: {k}k | "
                 print(msg, flush=True)
 
-            if step%5000 == 0:
-                gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
-                gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )
+            # if step%5000 == 0:
+            #     gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
+            #     # gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )

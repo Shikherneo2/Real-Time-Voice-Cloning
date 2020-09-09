@@ -31,7 +31,7 @@ class VocoderDataset(Dataset):
         wav = np.load(wav_path)
         # Load the wav
         # wav, _ = librosa.load( wav_path, 16000 )
-        rescaling_max=0.95
+        rescaling_max=0.98
         wav = wav / np.abs(wav).max() * rescaling_max
 
         # # sh_changes - Removed these wav filterings, as openseq2seq does not do them
@@ -47,15 +47,15 @@ class VocoderDataset(Dataset):
         # assert len(wav) % hp.hop_length == 0
         
         # Quantize the wav
-        if hp.voc_mode == 'RAW':
-            if hp.mu_law:
-                quant = audio.encode_mu_law(wav, mu=2 ** hp.bits)
-            else:
-                quant = audio.float_2_label(wav, bits=hp.bits)
-        elif hp.voc_mode == 'MOL':
-            quant = audio.float_2_label(wav, bits=16).astype(np.int64)
+        # if hp.voc_mode == 'RAW':
+        #     if hp.mu_law:
+        #         quant = audio.encode_mu_law(wav, mu=2 ** hp.bits)
+        #     else:
+        #         quant = audio.float_2_label(wav, bits=hp.bits)
+        # elif hp.voc_mode == 'MOL':
+        #     quant = audio.float_2_label(wav, bits=16).astype(np.int64)
             
-        return mel, quant
+        return mel, wav
 
     def __len__(self):
         return len(self.samples_fpaths)
@@ -72,19 +72,19 @@ def collate_vocoder(batch):
     labels = [x[1][sig_offsets[i]:sig_offsets[i] + hp.voc_seq_len + 1] for i, x in enumerate(batch)]
 
     mels = np.stack(mels).astype(np.float32)
-    labels = np.stack(labels).astype(np.int64)
+    labels = np.stack(labels).astype(np.float32)
 
     mels = torch.tensor(mels)
-    labels = torch.tensor(labels).long()
+    labels = torch.tensor(labels)
 
     x = labels[:, :hp.voc_seq_len]
     y = labels[:, 1:]
 
-    bits = 16 if hp.voc_mode == 'MOL' else hp.bits
+    # bits = 16 if hp.voc_mode == 'MOL' else hp.bits
 
-    x = audio.label_2_float(x.float(), bits)
+    # # x = audio.label_2_float(x.float(), bits)
 
-    if hp.voc_mode == 'MOL' :
-        y = audio.label_2_float(y.float(), bits)
+    # # if hp.voc_mode == 'MOL' :
+    # #     y = audio.label_2_float(y.float(), bits)
 
     return x, y, mels

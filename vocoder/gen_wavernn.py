@@ -22,8 +22,8 @@ def gen_testset(model: WaveRNN, test_set, samples, batched, target, overlap, sav
         #     x = decode_mu_law(x, 2**bits, from_labels=True)
         # else :
         #     x = label_2_float(x, bits)
-        x2 = label_2_float(x, 16)
-        scipy.io.wavfile.write( save_path.joinpath("%dk_steps_%d_target_label_2_float.wav" % (k, i)), 22050, x2)
+        # x2 = label_2_float(x, 16)
+        scipy.io.wavfile.write( save_path.joinpath("%dk_steps_%d_target_label_2_float.wav" % (k, i)), 22050, x )
         
         batch_str = "gen_batched_target%d_overlap%d" % (target, overlap) if batched else "gen_not_batched"
         save_str = save_path.joinpath("%dk_steps_%d_%s.wav" % (k, i, batch_str))
