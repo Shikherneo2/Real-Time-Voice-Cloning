@@ -7,7 +7,8 @@ from vocoder.models.fatchord_version import WaveRNN
 from vocoder.vocoder_dataset import VocoderDataset, collate_vocoder
 from vocoder.distribution import discretized_mix_logistic_loss
 from vocoder.display import stream, simple_table
-from vocoder.gen_wavernn import gen_testset, gen_meltest
+from vocoder.gen_wavernn import gen_testset
+# , gen_meltest
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import vocoder.hparams as hp
@@ -72,7 +73,7 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
     epoch_start = 0
     epoch_end = 1000
     
-    log_path = os.path.join( models_dir, "logs" )
+    log_path = os.path.join( model_dir, "logs" )
     if not os.path.isdir(log_path):
         os.mkdir(log_path)
     
@@ -91,7 +92,12 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
         start = time.time()
         running_loss = 0.
 
+        step = 0
         for i, (x, y, m) in enumerate(data_loader, 1):
+            if step%5000 == 0:
+                gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
+                # gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )
+
             x, m, y = x.cuda(), m.cuda(), y.cuda()
             
             # Forward pass
