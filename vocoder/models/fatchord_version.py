@@ -196,10 +196,11 @@ class WaveRNN(nn.Module):
         # print(x.shape)
         
         # 70, 16, 80, 30 -> 70, 80, 16, 30
+        # check the final transformation!!
         x = x.reshape(bsize, self.scale_factor, -1, 30).transpose(2,1).reshape(bsize, -1, po)
 
         # 70, 16, 80*30 -> 70, 80*30, 16 -> 70,  ,30
-        x = x.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
+        # x = x.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
         # print(x.shape)
         return x
 
@@ -224,7 +225,6 @@ class WaveRNN(nn.Module):
             mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, side='both')
             mels, aux = self.upsample(mels.transpose(1, 2))
 
-            #check!!
             # mels = mels.reshape( original_bsize, self.scale_factor, -1, mels.size(2) )
             # aux = aux.reshape( original_bsize, self.scale_factor, -1, aux.size(2) )
             # mels = mels.transpose(2,1)
