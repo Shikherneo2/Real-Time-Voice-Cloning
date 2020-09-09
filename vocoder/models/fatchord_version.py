@@ -272,7 +272,8 @@ class WaveRNN(nn.Module):
                     if i % 100 == 0:
                         gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
                         progress_callback(i, seq_len, b_size, gen_rate)
-                    
+        
+        end = time.time()
         output = torch.stack(output).squeeze()
         # po = output.size(-1)
         # bsize = output.size(0)
@@ -281,6 +282,7 @@ class WaveRNN(nn.Module):
 
         # output = output.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
         output = torch.flatten( output )
+        print( output.size(0)/(end-start)+"Hz" )
         output = output.cpu().numpy()
         output = output.astype(np.float64)
         
