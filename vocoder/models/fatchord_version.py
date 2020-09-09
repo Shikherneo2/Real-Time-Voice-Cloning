@@ -262,10 +262,10 @@ class WaveRNN(nn.Module):
                 logits = self.fc3(x)
 
                 # Sample from discretized mixed logistic
-                #check!!
-                print(logits.shape)
+                
+                # torch.Size([16, 30])
                 sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
-                print(sample.shape)
+                # sample - torch.Size([1, 16])
 
                 output.append(sample.view(-1))
                 x = sample.unsqueeze(0).cuda()
@@ -273,7 +273,6 @@ class WaveRNN(nn.Module):
 
                 x = self.condition_samples( x ).squeeze(0)
                 x = x.repeat(b_size, 1)
-                break
                 if progress_callback is not None:
                     if i % 100 == 0:
                         gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
@@ -289,7 +288,7 @@ class WaveRNN(nn.Module):
 
         # output = output.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
         output = torch.flatten( output )
-        print( output.size(0)/(end-start)+"Hz" )
+        print( str(output.size(0)/(end-start))+"Hz" )
         output = output.cpu().numpy()
         output = output.astype(np.float32)
         

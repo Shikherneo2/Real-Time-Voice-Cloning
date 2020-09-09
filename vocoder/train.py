@@ -94,9 +94,9 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
 
         step = 0
         for i, (x, y, m) in enumerate(data_loader, 1):
-            if step%5000 == 0:
-                gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
-                # gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )
+            # if step%5000 == 0:
+            #     gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
+            #     # gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )
 
             x, m, y = x.cuda(), m.cuda(), y.cuda()
             
