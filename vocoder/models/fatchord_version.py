@@ -224,8 +224,17 @@ class WaveRNN(nn.Module):
             mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, side='both')
             mels, aux = self.upsample(mels.transpose(1, 2))
 
-            mels = mels.reshape( original_bsize, self.scale_factor, -1, mels.size(2) )
-            aux = aux.reshape( original_bsize, self.scale_factor, -1, aux.size(2) )
+            #check!!
+            # mels = mels.reshape( original_bsize, self.scale_factor, -1, mels.size(2) )
+            # aux = aux.reshape( original_bsize, self.scale_factor, -1, aux.size(2) )
+            # mels = mels.transpose(2,1)
+            # aux = aux.transpose(2,1)
+
+            # mels = mels.reshape( scaled_bsize, -1, mels.size(-1) )
+            # aux = aux.reshape( scaled_bsize, -1, aux.size(-1) )
+
+            mels = mels.reshape( original_bsize, -1, self.scale_factor, mels.size(2) )
+            aux = aux.reshape( original_bsize, -1, self.scale_factor, aux.size(2) )
             mels = mels.transpose(2,1)
             aux = aux.transpose(2,1)
 
