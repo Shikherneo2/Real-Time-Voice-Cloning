@@ -19,10 +19,10 @@ class SampleConditioningNetwork( nn.Module ):
 
 if __name__ == "__main__":
     net = SampleConditioningNetwork( 3, 1, 1 )
-    inputs = torch.from_numpy( np.random.randn( 8, 1, 16 ) )
+    inputs = torch.from_numpy( np.random.randn( 8, 1, 4 ) )
     inputs = inputs.type(torch.float32)
     outputs = net( inputs )
     print(outputs.shape)
-    outputs = outputs.reshape(4, 2, -1).squeeze()
-    print(outputs.shape)
-    print(outputs.unsqueeze(1).shape)
+    # outputs = outputs.reshape(4, 2, -1).squeeze()
+    # print(outputs.shape)
+    # print(outputs.unsqueeze(1).shape)

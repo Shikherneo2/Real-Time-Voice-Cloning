@@ -107,7 +107,7 @@ class WaveRNN(nn.Module):
                  hop_length, sample_rate, mode='RAW'):
         super().__init__()
         self.mode = mode
-        self.scale_factor = 16
+        self.scale_factor = 4 #16
         self.pad = pad
         if self.mode == 'RAW' :
             self.n_classes = 2 ** bits
@@ -120,7 +120,7 @@ class WaveRNN(nn.Module):
         self.aux_dims = res_out_dims // 4
         self.hop_length = hop_length
         self.sample_rate = sample_rate
-        self.condition_net_size = 66
+        self.condition_net_size = 18 #66
 
         self.upsample = UpsampleNetwork(feat_dims, upsample_factors, compute_dims, res_blocks, res_out_dims, pad)
         self.I = nn.Linear(feat_dims + self.aux_dims + self.condition_net_size, rnn_dims)
@@ -143,8 +143,8 @@ class WaveRNN(nn.Module):
         h2 = torch.zeros(1, scaled_bsize, self.rnn_dims).cuda()
         mels, aux = self.upsample(mels)
 
-        mels = mels.reshape( bsize, -1, self.scale_factor, mels.size(2) )
-        aux = aux.reshape( bsize, -1, self.scale_factor, aux.size(2) )
+        mels = mels.reshape( bsize, -1, self.scale_factor, mels.size(-1) )
+        aux = aux.reshape( bsize, -1, self.scale_factor, aux.size(-1) )
         mels = mels.transpose(2,1)
         aux = aux.transpose(2,1)
 
@@ -191,17 +191,10 @@ class WaveRNN(nn.Module):
         
         po = x.size(-1)
         
-        # torch.Size([1120, 80, 30])
-        # torch.Size([70, 1280, 30])
-        # print(x.shape)
-        
-        # 70, 16, 80, 30 -> 70, 80, 16, 30
-        # check the final transformation!!
+        # 1120, 80, 30
+        # 70, 16, 80, 30 -> 70, 80, 16, 30 -> 70, 1280, 30
         x = x.reshape(bsize, self.scale_factor, -1, 30).transpose(2,1).reshape(bsize, -1, po)
 
-        # 70, 16, 80*30 -> 70, 80*30, 16 -> 70,  ,30
-        # x = x.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
-        # print(x.shape)
         return x
 
 
@@ -218,23 +211,14 @@ class WaveRNN(nn.Module):
 
         with torch.no_grad():
             mels = mels.cuda()
-            wave_len = (mels.size(-1) - 1) * self.hop_length
             original_bsize = mels.size(0)
             scaled_bsize = original_bsize*self.scale_factor
 
             mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, side='both')
             mels, aux = self.upsample(mels.transpose(1, 2))
 
-            # mels = mels.reshape( original_bsize, self.scale_factor, -1, mels.size(2) )
-            # aux = aux.reshape( original_bsize, self.scale_factor, -1, aux.size(2) )
-            # mels = mels.transpose(2,1)
-            # aux = aux.transpose(2,1)
-
-            # mels = mels.reshape( scaled_bsize, -1, mels.size(-1) )
-            # aux = aux.reshape( scaled_bsize, -1, aux.size(-1) )
-
-            mels = mels.reshape( original_bsize, -1, self.scale_factor, mels.size(2) )
-            aux = aux.reshape( original_bsize, -1, self.scale_factor, aux.size(2) )
+            mels = mels.reshape( original_bsize, -1, self.scale_factor, mels.size(-1) )
+            aux = aux.reshape( original_bsize, -1, self.scale_factor, aux.size(-1) )
             mels = mels.transpose(2,1)
             aux = aux.transpose(2,1)
 
