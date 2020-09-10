@@ -274,10 +274,9 @@ class WaveRNN(nn.Module):
                 # torch.Size([16, 30])
                 sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
                 # sample - torch.Size([1, 16])
+                output.append(sample.view(-1))
 
-                output.append(sample.t())
-                
-                # output.append(sample.view(-1))
+                x = sample.t().cuda()
                 # x = sample.transpose(0, 1).cuda()
 
                 # (1,1,16)
