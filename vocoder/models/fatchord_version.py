@@ -123,7 +123,8 @@ class WaveRNN(nn.Module):
         self.condition_net_size = 18 #66
 
         self.upsample = UpsampleNetwork(feat_dims, upsample_factors, compute_dims, res_blocks, res_out_dims, pad)
-        self.I = nn.Linear(feat_dims + self.aux_dims + self.condition_net_size, rnn_dims)
+        # self.I = nn.Linear(feat_dims + self.aux_dims + self.condition_net_size, rnn_dims)
+        self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
         self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
         self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
         self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
@@ -131,7 +132,7 @@ class WaveRNN(nn.Module):
         self.fc3 = nn.Linear(fc_dims, self.n_classes)
 
         self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
-        self.condition_samples = SampleConditioningNetwork( 3, 1, 1 )
+        # self.condition_samples = SampleConditioningNetwork( 3, 1, 1 )
         self.num_params()
 
     def forward(self, x, mels):
@@ -162,15 +163,21 @@ class WaveRNN(nn.Module):
         _,b,_ = x.size()
 
 
-        x = self.condition_samples( x.reshape( bsize*b, -1 ).unsqueeze(1) )
-        x = x.reshape( bsize, b, -1 )
+        # x = self.condition_samples( x.reshape( bsize*b, -1 ).unsqueeze(1) )
+        # x = x.reshape( bsize, b, -1 )
+
+
         # torch.Size([70, 80, 66])
-        x = x.unsqueeze(1).repeat( 1, self.scale_factor, 1, 1 )
-        x = x.reshape( scaled_bsize, b, -1 )
+        # x = x.unsqueeze(1).repeat( 1, self.scale_factor, 1, 1 )
+        # x = x.reshape( scaled_bsize, b, -1 )
 
         # x = x.transpose(2,1)
         # 70, 16, 80, 80
         # torch.Size([1120, 80, 80])
+
+        # 70,80,16 -> 70,16,80 ->1120,80 -> 1120,80,1
+        x = x.transpose( 2, 1 ).reshape( scaled_bsize, b ).unsqueeze(-1)
+        
         x = torch.cat([x, mels, a1], dim=2)
         x = self.I(x)
         res = x
@@ -233,7 +240,8 @@ class WaveRNN(nn.Module):
 
             h1 = torch.zeros(b_size, self.rnn_dims).cuda()
             h2 = torch.zeros(b_size, self.rnn_dims).cuda()
-            x = torch.zeros(b_size, self.condition_net_size).cuda()
+            # x = torch.zeros(b_size, self.condition_net_size).cuda()
+            x = torch.zeros(b_size, 1).cuda()
 
             d = self.aux_dims
             aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
@@ -267,12 +275,15 @@ class WaveRNN(nn.Module):
                 sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
                 # sample - torch.Size([1, 16])
 
-                output.append(sample.view(-1))
-                x = sample.unsqueeze(0).cuda()
+                output.append(sample.t())
+                
+                # output.append(sample.view(-1))
                 # x = sample.transpose(0, 1).cuda()
 
-                x = self.condition_samples( x ).squeeze(0)
-                x = x.repeat(b_size, 1)
+                # (1,1,16)
+                # x = sample.unsqueeze(0).cuda()
+                # x = self.condition_samples( x ).squeeze(0)
+                # x = x.repeat(b_size, 1)
                 if progress_callback is not None:
                     if i % 100 == 0:
                         gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
