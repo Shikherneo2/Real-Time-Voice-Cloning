@@ -179,8 +179,9 @@ class WaveRNN(nn.Module):
         # 70, 80, 16
         _,b,_ = x.size()
 
-
-        x = self.pred_condition_net( x.reshape( bsize*b, -1 ).unsqueeze(1) ).squeeze(1).unsqueeze(-1)
+        x = self.pred_condition_net( x.reshape( bsize*b, -1 ).unsqueeze(1) ).squeeze(1)
+        x = x.reshape( bsize, b, -1 ).transpose( 2,1 )
+        x = x.reshape( scaled_bsize, b).unsqueeze(-1)
 
         # x = self.condition_samples( x.reshape( bsize*b, -1 ).unsqueeze(1) )
         # x = x.reshape( bsize, b, -1 )

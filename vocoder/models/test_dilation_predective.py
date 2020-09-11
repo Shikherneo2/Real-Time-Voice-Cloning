@@ -31,7 +31,7 @@ class SampleConditioningNetwork8( nn.Module ):
             for j in self.layers:
                 a = j(a)
             x = torch.cat([x[:,:,1:], a], dim=-1)
-            print(x)
+            # print(x)
         return x
 
 if __name__ == "__main__":
@@ -39,10 +39,10 @@ if __name__ == "__main__":
     # inputs = torch.from_numpy( np.random.randn( 1, 1, 16 ) )
 
     net = SampleConditioningNetwork8( 1, 1 )
-    inputs = torch.from_numpy( np.random.randn( 1, 1, 8 ) )
+    inputs = torch.from_numpy( np.random.randn( 5, 1, 8 ) )
     
     inputs = inputs.type(torch.float32)
     outputs = net( inputs )
     print( inputs )
-    print( outputs )
+    # print( outputs )
     print(outputs.shape)
