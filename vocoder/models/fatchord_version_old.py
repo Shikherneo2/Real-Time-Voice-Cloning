@@ -16,8 +16,7 @@ class SampleConditioningNetwork8( nn.Module ):
             self.layers.append( nn.Conv1d( indims, outdims, kernel_size=2, bias=False, dilation=2**i ) )
     
     def forward( self, x ):
-        times = 8 if self.training else 7
-        for i in range(times):
+        for i in range(7):
             a = x
             for j in self.layers:
                 a = j(a)
@@ -150,14 +149,7 @@ class WaveRNN(nn.Module):
         self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
         self.pred_condition_net = SampleConditioningNetwork8(1,1)
         # self.condition_samples = SampleConditioningNetwork( 3, 1, 1 )
-        self.real_samples_probability = 0.5
         self.num_params()
-
-    def get_orig_mask(self, size):
-        # batch_size, seq_len, 1
-        first_col = torch.ones( size[0], 1, size[2] )
-        others = torch.cuda.FloatTensor( size[0], size[1]-1, size[2] ).uniform_() < self.real_samples_probability
-        return torch.cat([first_col, others.float()], dim=1)
 
     def forward(self, x, mels):
         self.step += 1
@@ -186,18 +178,10 @@ class WaveRNN(nn.Module):
         # 70, 80, 16
         _,b,_ = x.size()
 
-        # 70*16, 80, 1
-        orig_x = x.transpose(2,1).reshape( scaled_bsize, b ).unsqueeze(-1)
-        orig_mask = self.get_orig_mask( orig_x.size() )
-
-        x2 = x.reshape( bsize*b, -1 )
-        x = self.pred_condition_net( x2.unsqueeze(1) ).squeeze(1)
+        x = self.pred_condition_net( x.reshape( bsize*b, -1 ).unsqueeze(1) ).squeeze(1)
         x = x.reshape( bsize, b, -1 ).transpose( 2,1 )
         x = x.reshape( scaled_bsize, b).unsqueeze(-1)
-        
-        siz = x.size()
-        x = torch.cat( [torch.zeros(siz[0],1,siz[2] ,dtype=torch.float32), x[:,:-1,:]], dim=1)
-        x = (orig_mask*orig_x) + ((1-orig_mask)*x)
+
         # x = self.condition_samples( x.reshape( bsize*b, -1 ).unsqueeze(1) )
         # x = x.reshape( bsize, b, -1 )
 
