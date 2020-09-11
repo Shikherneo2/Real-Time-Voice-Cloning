@@ -8,6 +8,22 @@ from vocoder.distribution import sample_from_discretized_mix_logistic
 from vocoder.display import *
 from vocoder.audio import *
 
+class SampleConditioningNetwork8( nn.Module ):
+    def __init__( self, indims, outdims ):
+        super().__init__()
+        self.layers = nn.ModuleList()
+        for i in range( 3 ):
+            self.layers.append( nn.Conv1d( indims, outdims, kernel_size=2, bias=False, dilation=2**i ) )
+    
+    def forward( self, x ):
+        for i in range(7):
+            a = x
+            for j in self.layers:
+                a = j(a)
+            x = torch.cat([x[:,:,1:], a], dim=-1)
+            print(x)
+        return x
+
 class SampleConditioningNetwork( nn.Module ):
     def __init__( self, num_layers, indims, outdims ):
         super().__init__()
@@ -107,10 +123,10 @@ class WaveRNN(nn.Module):
                  hop_length, sample_rate, mode='RAW'):
         super().__init__()
         self.mode = mode
-        self.scale_factor = 4 #16
+        self.scale_factor = 8 #16
         self.pad = pad
         if self.mode == 'RAW' :
-            self.n_classes = 2 ** bits
+            self.n_classes = 2 ** bit
         elif self.mode == 'MOL' :
             self.n_classes = 30
         else :
@@ -132,6 +148,7 @@ class WaveRNN(nn.Module):
         self.fc3 = nn.Linear(fc_dims, self.n_classes)
 
         self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
+        self.pred_condition_net = SampleConditioningNetwork8(1,1)
         # self.condition_samples = SampleConditioningNetwork( 3, 1, 1 )
         self.num_params()
 
@@ -163,6 +180,8 @@ class WaveRNN(nn.Module):
         _,b,_ = x.size()
 
 
+        x = self.pred_condition_net( x.reshape( bsize*b, -1 ).unsqueeze(1) ).squeeze(1).unsqueeze(-1)
+
         # x = self.condition_samples( x.reshape( bsize*b, -1 ).unsqueeze(1) )
         # x = x.reshape( bsize, b, -1 )
 
@@ -176,7 +195,7 @@ class WaveRNN(nn.Module):
         # torch.Size([1120, 80, 80])
 
         # 70,80,16 -> 70,16,80 ->1120,80 -> 1120,80,1
-        x = x.transpose( 2, 1 ).reshape( scaled_bsize, b ).unsqueeze(-1)
+        # x = x.transpose( 2, 1 ).reshape( scaled_bsize, b ).unsqueeze(-1)
         
         x = torch.cat([x, mels, a1], dim=2)
         x = self.I(x)
@@ -276,7 +295,9 @@ class WaveRNN(nn.Module):
                 # sample - torch.Size([1, 16])
                 output.append(sample.view(-1))
 
-                x = sample.t().cuda()
+                x = self.pred_condition_net( sample.unsqueeze(0) ).squeeze(1).t()
+
+                # x = sample.t().cuda()
                 # x = sample.transpose(0, 1).cuda()
 
                 # (1,1,16)

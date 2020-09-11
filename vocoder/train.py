@@ -96,7 +96,6 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
             gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
             # gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )
         
-        step = 0
         for i, (x, y, m) in enumerate(data_loader, 1):
 
             x, m, y = x.cuda(), m.cuda(), y.cuda()
@@ -128,8 +127,10 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
             # if save_every != 0 and step % save_every == 0 :
             #     model.save(weights_fpath, optimizer)
             
+            if step%100 == 0:
+                writer.add_scalar('Loss/train', avg_loss, round(float(step)/100,1))
+                
             if step%500 == 0:
-                writer.add_scalar('Loss/train', avg_loss, round(step/1000,1))
                 msg = f"| Epoch: {epoch} ({i}/{len(data_loader)}) | " \
                     f"Loss: {avg_loss:.4f} | {speed:.1f} " \
                     f"steps/s | Step: {k}k | "
