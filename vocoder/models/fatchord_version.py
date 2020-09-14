@@ -265,13 +265,13 @@ class WaveRNN(nn.Module):
 
 
     def generate(self, mels, batched, target, overlap, mu_law, progress_callback=True):
-        samples_in_seq = 32
         mu_law = mu_law if self.mode == 'RAW' else False
         if progress_callback is not None:
             progress_callback = self.gen_display
 
         self.eval()
-        output = []
+
+        output = [0 for i in range(16)]
         rnn1 = self.get_gru_cell(self.rnn1)
         rnn2 = self.get_gru_cell(self.rnn2)
 
@@ -284,52 +284,6 @@ class WaveRNN(nn.Module):
             mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, side='both')
             mels, aux = self.upsample(mels.transpose(1, 2))
 
-            b_size, _, _ = mels.size()
-
-            mels1 = mels[:,:samples_in_seq,:]
-            aux1 = aux[:,:samples_in_seq,:]
-            mels = mels[:,samples_in_seq:,:]
-            aux = aux[:,samples_in_seq:,:]
-
-            h1 = torch.zeros(b_size, self.rnn_dims).cuda()
-            h2 = torch.zeros(b_size, self.rnn_dims).cuda()
-            x = torch.zeros(b_size, 1).cuda()
-
-            d = self.aux_dims
-            aux1_split = [aux1[:, :, d * i:d * (i + 1)] for i in range(4)]
-
-            for i in range(samples_in_seq):
-
-                m_t = mels1[:, i, :]
-
-                a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux1_split)
-
-                x = torch.cat([x, m_t, a1_t], dim=1)
-                x = self.I(x)
-                h1 = rnn1(x, h1)
-
-                x = x + h1
-                inp = torch.cat([x, a2_t], dim=1)
-                h2 = rnn2(inp, h2)
-
-                x = x + h2
-                x = torch.cat([x, a3_t], dim=1)
-                x = F.relu(self.fc1(x))
-
-                x = torch.cat([x, a4_t], dim=1)
-                x = F.relu(self.fc2(x))
-
-                logits = self.fc3(x)
-
-                # Sample from discretized mixed logistic
-                
-                # torch.Size([16, 30])
-                sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
-                # sample - torch.Size([1, 16])
-                output.extend( sample.view(-1) )
-                x = sample.transpose(0, 1).cuda()
-
-            # output = [output]
             mels = mels.reshape( original_bsize, -1, self.scale_factor, mels.size(-1) )
             aux = aux.reshape( original_bsize, -1, self.scale_factor, aux.size(-1) )
             mels = mels.transpose(2,1)
@@ -337,23 +291,22 @@ class WaveRNN(nn.Module):
 
             mels = mels.reshape( scaled_bsize, -1, mels.size(-1) )
             aux = aux.reshape( scaled_bsize, -1, aux.size(-1) )
-            
+
             # if batched:
             #     mels = self.fold_with_overlap(mels, target, overlap)
             #     aux = self.fold_with_overlap(aux, target, overlap)
 
             b_size, seq_len, _ = mels.size()
 
-            d = self.aux_dims
-            aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
-            
-            x = torch.tensor(output).reshape( 1, 1, samples_in_seq ).cuda()
-            x = self.pred_condition_net( x ).squeeze(1)
-            x = x.repeat( b_size, 1 )
-
             h1 = torch.zeros(b_size, self.rnn_dims).cuda()
             h2 = torch.zeros(b_size, self.rnn_dims).cuda()
-            
+            # x = torch.zeros(b_size, self.condition_net_size).cuda()
+            x = torch.zeros(b_size, 1, 32).cuda()
+            x = self.pred_condition_net(x)
+
+            d = self.aux_dims
+            aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
+
             for i in range(seq_len):
 
                 m_t = mels[:, i, :]
@@ -382,10 +335,10 @@ class WaveRNN(nn.Module):
                 # torch.Size([16, 30])
                 sample = sample_from_discretized_mix_logistic(logits.unsqueeze(0).transpose(1, 2))
                 # sample - torch.Size([1, 16])
-                output.extend( list(sample.flatten()) )
+                output.extend( list(sample.view(-1)) )
 
-                cond_x = torch.tensor(output[-32:]).unsqueeze(0).unsqueeze(0).cuda()
-                x = self.pred_condition_net( cond_x ).squeeze(1).repeat( b_size, 1)
+                last_samples = torch.tensor(output[-32:]).reshape(1,1,32).cuda()
+                x = self.pred_condition_net( last_samples ).squeeze(1)
 
                 # x = sample.t().cuda()
                 # x = sample.transpose(0, 1).cuda()
@@ -410,7 +363,7 @@ class WaveRNN(nn.Module):
         # output = output.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
         # output = torch.flatten( output )
         # output = output.cpu().numpy()
-        output = np.array(output).astype(np.float32)
+        output = output.astype(np.float32)
         print( str(round(output.shape[0]/1000/(end-start), 3))+" KHz" )
         
         self.train()
