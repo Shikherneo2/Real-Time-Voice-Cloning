@@ -1,6 +1,8 @@
 from vocoder.models.fatchord_version import WaveRNN
 from vocoder import hparams as hp
 import torch
+import scipy.io.wavfile
+import numpy as np
 
 
 _model = None   # type: WaveRNN
@@ -36,8 +38,7 @@ def is_loaded():
     return _model is not None
 
 
-def infer_waveform(mel, normalize=True,  batched=True, target=8000, overlap=800, 
-                   progress_callback=None):
+def infer_waveform(mel, normalize=False,  batched=False, target=8000, overlap=800, progress_callback=None):
     """
     Infers the waveform of a mel spectrogram output by the synthesizer (the format must match 
     that of the synthesizer!)
@@ -53,6 +54,13 @@ def infer_waveform(mel, normalize=True,  batched=True, target=8000, overlap=800,
     
     if normalize:
         mel = mel / hp.mel_max_abs_value
-    mel = torch.from_numpy(mel[None, ...])
+
+    mel = torch.from_numpy( mel )
     wav = _model.generate(mel, batched, target, overlap, hp.mu_law, progress_callback)
     return wav
+
+mel = np.load("/home/sdevgupta/mine/OpenSeq2Seq/ljspeech_catheryn_logs/combined_mels/black_beauty_17-000053.npy")
+
+load_model("/home/sdevgupta/mine/Real-Time-Voice-Cloning/experiments/run2_autoregressive_context/checkpoint_105k_steps.pt")
+wav = infer_waveform( [mel] ).astype("int16")
+scipy.io.wavfile.write( "/home/sdevgupta/Desktop/tests_wavernn_wav_datatype/test_int16.wav", 22050, wav)

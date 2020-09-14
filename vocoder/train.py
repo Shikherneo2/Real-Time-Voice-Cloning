@@ -92,7 +92,7 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
         start = time.time()
         running_loss = 0.
 
-        if epoch%8 == 0:
+        if epoch%10 == 0:
             gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
             # gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )
         

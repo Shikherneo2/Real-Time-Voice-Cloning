@@ -29,10 +29,10 @@ class VocoderDataset(Dataset):
         # mel = np.load(mel_path).T.astype(np.float32) / hp.mel_max_abs_value
         mel = np.load(mel_path).astype(np.float32)[:, :-10]
         wav = np.load(wav_path)
-        # Load the wav
-        # wav, _ = librosa.load( wav_path, 16000 )
-        rescaling_max=0.98
-        wav = wav / np.abs(wav).max() * rescaling_max
+
+        #NOT DO THIS??
+        # rescaling_max=0.98
+        # wav = wav / np.abs(wav).max() * rescaling_max
 
         # # sh_changes - Removed these wav filterings, as openseq2seq does not do them
         # # if hp.apply_preemphasis:
@@ -69,7 +69,7 @@ def collate_vocoder(batch):
 
     mels = [x[0][:, mel_offsets[i]:mel_offsets[i] + mel_win] for i, x in enumerate(batch)]
 
-    labels = [x[1][sig_offsets[i]:sig_offsets[i] + hp.voc_seq_len + 1] for i, x in enumerate(batch)]
+    labels = [x[1][sig_offsets[i]:sig_offsets[i] + hp.voc_seq_len + 32 ] for i, x in enumerate(batch)]
 
     mels = np.stack(mels).astype(np.float32)
     labels = np.stack(labels).astype(np.float32)
@@ -77,9 +77,8 @@ def collate_vocoder(batch):
     mels = torch.tensor(mels)
     labels = torch.tensor(labels)
 
-    x = labels[:, :hp.voc_seq_len]
-    y = labels[:, 1:]
-
+    x = labels[:, :-16]
+    y = labels[:, 32:]
     # bits = 16 if hp.voc_mode == 'MOL' else hp.bits
 
     # # x = audio.label_2_float(x.float(), bits)
