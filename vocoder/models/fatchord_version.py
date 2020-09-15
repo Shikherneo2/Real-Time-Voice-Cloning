@@ -18,7 +18,7 @@ class SampleConditioningNetwork64_autoregressive( nn.Module ):
         self.layers.append( nn.Conv1d( indims, outdims, kernel_size=2, bias=False ) )
 
     def forward( self, x ):
-        times = 16 if self.training else 15
+        times = 15
         for i in range(times):
             a = x
             for j in self.layers:

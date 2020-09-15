@@ -46,9 +46,8 @@ class VocoderDataset(Dataset):
         #     else:
         #         quant = audio.float_2_label(wav, bits=hp.bits)
         # elif hp.voc_mode == 'MOL':
-        quant = audio.float_2_label(wav, bits=16).astype(np.int64)
             
-        return mel, quant
+        return mel, wav
 
     def __len__(self):
         return len(self.samples_fpaths)
@@ -65,10 +64,12 @@ def collate_vocoder(batch):
     labels = [x[1][sig_offsets[i]-64:sig_offsets[i] + hp.voc_seq_len ] for i, x in enumerate(batch)]
 
     mels = np.stack(mels).astype(np.float32)
-    labels = np.stack(labels).astype(np.int64)
+    labels = np.stack(labels)
 
     mels = torch.tensor(mels)
-    labels = torch.tensor(labels)
+
+    quant = audio.float_2_label(labels, bits=16).astype(np.int64)
+    labels = torch.tensor(quant).long()
 
     x = labels[:, :-16]
     y = labels[:, 64:]
