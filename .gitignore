@@ -1,3 +1,5 @@
+allout*
+train_lists/
 *.pyc
 *.aux
 *.log

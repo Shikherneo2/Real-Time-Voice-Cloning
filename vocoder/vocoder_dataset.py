@@ -27,7 +27,7 @@ class VocoderDataset(Dataset):
         
         # Load the mel spectrogram and adjust its range to [-1, 1]
         # mel = np.load(mel_path).T.astype(np.float32) / hp.mel_max_abs_value
-        mel = np.load(mel_path).astype(np.float32)[:, :-10]
+        mel = np.load(mel_path).astype(np.float32)
         wav = np.load(wav_path)
 
         #NOT DO THIS??
@@ -69,7 +69,7 @@ def collate_vocoder(batch):
 
     mels = [x[0][:, mel_offsets[i]:mel_offsets[i] + mel_win] for i, x in enumerate(batch)]
 
-    labels = [x[1][sig_offsets[i]:sig_offsets[i] + hp.voc_seq_len + 32 ] for i, x in enumerate(batch)]
+    labels = [x[1][sig_offsets[i]-32:sig_offsets[i] + hp.voc_seq_len ] for i, x in enumerate(batch)]
 
     mels = np.stack(mels).astype(np.float32)
     labels = np.stack(labels).astype(np.float32)
