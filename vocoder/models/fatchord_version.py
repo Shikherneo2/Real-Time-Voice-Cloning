@@ -223,11 +223,11 @@ class WaveRNN(nn.Module):
 
         # 70*16, 80, 1
         blocks = torch.tensor([]).cuda()
-        for i in range(0, sample_seq_len -64 + 1, 16):
-            blocks = torch.cat( [blocks, x[:,i:i+64]], dim=-1 )
+        for i in range(0, sample_seq_len 32 + 1, 16):
+            blocks = torch.cat( [blocks, x[:,i:i+32]], dim=-1 )
         # bsize*seq, 32
         #print(blocks.size())
-        blocks = blocks.reshape( bsize, -1, 64 )
+        blocks = blocks.reshape( bsize, -1, 32 )
         #print(blocks.size())
         #print(mels.size())
         a,b,c = blocks.size()
@@ -289,7 +289,7 @@ class WaveRNN(nn.Module):
 
         self.eval()
 
-        output = [0 for i in range(64-16)]
+        output = [0 for i in range(32-16)]
         rnn1 = self.get_gru_cell(self.rnn1)
         rnn2 = self.get_gru_cell(self.rnn2)
 
@@ -355,7 +355,7 @@ class WaveRNN(nn.Module):
                 # sample - torch.Size([1, 16])
                 output.extend( list(sample.view(-1)) )
 
-                last_samples = torch.tensor(output[-64:]).reshape(1,1,64).cuda()
+                last_samples = torch.tensor(output[-32:]).reshape(1,1,32).cuda()
                 x = self.pred_condition_net( last_samples ).squeeze(1)[:,-16:]
                 x = x.reshape( b_size, 1 )
                 # x = sample.t().cuda()
@@ -381,7 +381,7 @@ class WaveRNN(nn.Module):
         # output = output.reshape(bsize, self.scale_factor, -1).transpose(2,1).reshape(bsize, -1, po)
         # output = torch.flatten( output )
         # output = output.cpu().numpy()
-        output = output[64-16:]
+        output = output[32-16:]
         output = np.array(output).astype(np.float32)
         print( str(round(output.shape[0]/1000/(end-start), 3))+" KHz" )
         

@@ -28,9 +28,9 @@ class VocoderDataset(Dataset):
         # Load the mel spectrogram and adjust its range to [-1, 1]
         # mel = np.load(mel_path).T.astype(np.float32) / hp.mel_max_abs_value
         mel = np.load(mel_path).astype(np.float32)
-        wav = np.load(wav_path)
+        wav = np.load(wav_path).astype(np.float32)
         
-        wav = wav / np.abs(wav).max()
+        # wav = wav / np.abs(wav).max()
 
         # Fix for missing padding   # TODO: settle on whether this is any useful
         # r_pad =  (len(wav) // hp.hop_length + 1) * hp.hop_length - len(wav)
@@ -61,23 +61,23 @@ def collate_vocoder(batch):
 
     mels = [x[0][:, mel_offsets[i]:mel_offsets[i] + mel_win] for i, x in enumerate(batch)]
 
-    labels = [x[1][sig_offsets[i]-64:sig_offsets[i] + hp.voc_seq_len ] for i, x in enumerate(batch)]
+    labels = [x[1][sig_offsets[i]-32:sig_offsets[i] + hp.voc_seq_len ] for i, x in enumerate(batch)]
 
     mels = np.stack(mels).astype(np.float32)
-    labels = np.stack(labels)
+    labels = np.stack(labels).astype(np.float32)
 
     mels = torch.tensor(mels)
 
-    quant = audio.float_2_label(labels, bits=16).astype(np.int64)
-    labels = torch.tensor(quant).long()
+    # quant = audio.float_2_label(labels, bits=16).astype(np.int64)
+    labels = torch.tensor(labels)
 
     x = labels[:, :-16]
-    y = labels[:, 64:]
-    bits = 16 if hp.voc_mode == 'MOL' else hp.bits
+    y = labels[:, 32:]
+    # bits = 16 if hp.voc_mode == 'MOL' else hp.bits
 
-    x = audio.label_2_float(x.float(), bits)
+    # x = audio.label_2_float(x.float(), bits)
 
-    if hp.voc_mode == 'MOL' :
-        y = audio.label_2_float(y.float(), bits)
+    # if hp.voc_mode == 'MOL' :
+    #     y = audio.label_2_float(y.float(), bits)
 
     return x, y, mels

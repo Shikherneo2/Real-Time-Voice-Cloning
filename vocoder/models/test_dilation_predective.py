@@ -7,20 +7,21 @@ class SampleConditioningNetwork64_autoregressive( nn.Module ):
     def __init__( self, indims, outdims ):
         super().__init__()
         self.layers = nn.ModuleList()
-        for i in range( 5 ):
+        for i in range( 4 ):
             self.layers.append( nn.Conv1d( indims, outdims, kernel_size=3, bias=False, dilation=2**i ) )
-        self.layers.append( nn.Conv1d( indims, outdims, kernel_size=2, bias=False ) )
+        self.final_layer = nn.Conv1d( indims, outdims, kernel_size=2, bias=False )
 
     def forward( self, x ):
         # for j in self.layers:
-        #     x = j(x)
+        #     x = F.relu(j(x))
+        # x = self.final_layer(x)
         # return x
-
-        times = 16 
+        times = 15
         for i in range(times):
             a = x
             for j in self.layers:
-                a = j(a)
+                a = F.relu(j(a))
+            a = self.final_layer(a)
             x = torch.cat([x[:,:,1:], a], dim=-1)
         return x
 
@@ -56,7 +57,7 @@ class SampleConditioningNetwork64_16( nn.Module ):
 
 if __name__ == "__main__":
     # net = SampleConditioningNetwork16( 1, 1 )
-    inputs = torch.from_numpy( np.random.randn( 1, 1, 64 ) )
+    inputs = torch.from_numpy( np.random.randn( 1, 1, 32 ) )
     print( inputs )
 
     # net = SampleConditioningNetwork8( 1, 1 )
@@ -65,6 +66,5 @@ if __name__ == "__main__":
     # inputs = F.pad(inputs, (63,0))
     inputs = inputs.type(torch.float32)
     outputs = net( inputs )
-    # print( outputs )
     print(outputs)
     print(outputs.shape)
