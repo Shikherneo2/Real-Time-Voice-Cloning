@@ -87,7 +87,7 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
         data_loader = DataLoader(dataset,
                                  collate_fn=collate_vocoder,
                                  batch_size=hp.voc_batch_size,
-                                 num_workers=2,
+                                 num_workers=3,
                                  shuffle=True,
                                  pin_memory=True)
         start = time.time()
@@ -130,4 +130,4 @@ def train(run_id: str, models_dir: Path, metadata_path:Path, weights_path:Path, 
         if epoch%15 == 0:
             model.checkpoint(model_dir, optimizer)
             gen_testset( model, test_loader, hp.voc_gen_at_checkpoint, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap, model_dir )
-            gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )
+            #gen_meltest( model, hp.voc_gen_batched, hp.voc_target, hp.voc_overlap,model_dir )

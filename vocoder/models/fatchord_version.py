@@ -5,6 +5,9 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
+#from sru import SRU
+# sys.path.append("D:\Voice\Real-Time-Voice-Cloning")
+
 from vocoder.distribution import sample_from_discretized_mix_logistic
 from vocoder.display import *
 from vocoder.audio import *
@@ -13,6 +16,49 @@ torch.backends.cudnn.enabled = True
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+@torch.jit.script
+def sample_from_discretized_mix_logistic( y ):
+  """
+  Sample from discretized mixture of logistic distributions
+  Args:
+      y (Tensor): B x C x T
+      log_scale_min (float): Log scale minimum value
+  Returns:
+      Tensor: sample in range of [-1, 1].
+  """
+  nr_mix = y.size(1) // 3
+
+  # B x T x C
+  y = y.transpose(1, 2)
+  logit_probs = y[:, :, :nr_mix]
+
+  # sample mixture indicator from softmax
+  temp = torch.zeros(logit_probs.size(), dtype=torch.float32).uniform_(1e-5, 1.0 - 1e-5)
+  if logit_probs.is_cuda:
+    temp = temp.cuda()
+  temp = logit_probs.data - torch.log(- torch.log(temp))
+  _, argmax = temp.max(dim=-1)
+
+  # (B, T) -> (B, T, nr_mix)
+  one_hot = torch.zeros(argmax.size() + (nr_mix,), dtype=torch.float32)
+  if argmax.is_cuda:
+      one_hot = one_hot.cuda()
+  one_hot.scatter_(len(argmax.size()), argmax.unsqueeze(-1), 1)
+  
+  # select logistic parameters
+  means = torch.sum(y[:, :, nr_mix:2 * nr_mix] * one_hot, dim=-1)
+  
+  vv = torch.sum(y[:, :, 2 * nr_mix:3 * nr_mix] * one_hot, dim=-1)
+  log_scales = torch.clamp(vv, min=-32.23619130191664)
+  
+  # sample from logistic & clip to interval
+  # we don't actually round to the nearest 8bit value when sampling
+  u = torch.zeros( means.size(), dtype=means.data.dtype ).uniform_(1e-5, 1.0 - 1e-5).cuda()
+  x = means + torch.exp(log_scales) * (torch.log(u) - torch.log(1. - u))
+
+  x = torch.clamp(torch.clamp(x, min=-1.), max=1.)
+
+  return x
 
 class ResBlock(nn.Module):
     def __init__(self, dims):
@@ -52,74 +98,36 @@ class MelResNet(nn.Module):
         return x
 
 
-class Stretch4(nn.Module):
-    def __init__(self):
+class Stretch2d(nn.Module):
+    def __init__(self, x_scale, y_scale):
         super().__init__()
+        self.x_scale = x_scale
+        self.y_scale = y_scale
 
     def forward(self, x):
         b, c, h, w = x.size()
         x = x.unsqueeze(-1).unsqueeze(3)
-        x = x.repeat(1, 1, 1, 1, 1, 4)
-        return x.view(b, c, h , w * 4)
-
-
-class Stretch16(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        b, c, h, w = x.size()
-        x = x.unsqueeze(-1).unsqueeze(3)
-        x = x.repeat(1, 1, 1, 1, 1, 16)
-        return x.view(b, c, h , w * 16)
-
-class Stretch256(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        b, c, h, w = x.size()
-        x = x.unsqueeze(-1).unsqueeze(3)
-        x = x.repeat(1, 1, 1, 1, 1, 256)
-        return x.view(b, c, h , w * 256)
+        x = x.repeat(1, 1, 1, self.y_scale, 1, self.x_scale)
+        return x.view(b, c, h * self.y_scale, w * self.x_scale)
 
 
 class UpsampleNetwork(nn.Module):
     def __init__(self, feat_dims, upsample_scales, compute_dims,
                  res_blocks, res_out_dims, pad):
-        super( UpsampleNetwork, self ).__init__()
-        self.total_scale = np.cumproduct(upsample_scales)[-1]
-        self.indent = pad * self.total_scale
+        super().__init__()
+        total_scale = np.cumproduct(upsample_scales)[-1]
+        self.indent = pad * total_scale
         self.resnet = MelResNet(res_blocks, feat_dims, compute_dims, res_out_dims, pad)
-        self.resnet_stretch = Stretch256()
+        self.resnet_stretch = Stretch2d(total_scale, 1)
         self.up_layers = nn.ModuleList()
-        
-        scale = 4
-        k_size = (1, scale * 2 + 1)
-        padding = (0, scale)
-        stretch = Stretch4()
-        conv = nn.Conv2d(1, 1, kernel_size=k_size, padding=padding, bias=False)
-        conv.weight.data.fill_(1. / k_size[1])
-        self.up_layers.append(stretch)
-        self.up_layers.append(conv)
-
-        scale = 4
-        k_size = (1, scale * 2 + 1)
-        padding = (0, scale)
-        stretch = Stretch4()
-        conv = nn.Conv2d(1, 1, kernel_size=k_size, padding=padding, bias=False)
-        conv.weight.data.fill_(1. / k_size[1])
-        self.up_layers.append(stretch)
-        self.up_layers.append(conv)
-
-        scale = 16
-        k_size = (1, scale * 2 + 1)
-        padding = (0, scale)
-        stretch = Stretch16()
-        conv = nn.Conv2d(1, 1, kernel_size=k_size, padding=padding, bias=False)
-        conv.weight.data.fill_(1. / k_size[1])
-        self.up_layers.append(stretch)
-        self.up_layers.append(conv)
+        for scale in upsample_scales:
+            k_size = (1, scale * 2 + 1)
+            padding = (0, scale)
+            stretch = Stretch2d(scale, 1)
+            conv = nn.Conv2d(1, 1, kernel_size=k_size, padding=padding, bias=False)
+            conv.weight.data.fill_(1. / k_size[1])
+            self.up_layers.append(stretch)
+            self.up_layers.append(conv)
 
     def forward(self, m):
         aux = self.resnet(m).unsqueeze(1)
@@ -127,170 +135,355 @@ class UpsampleNetwork(nn.Module):
         aux = aux.squeeze(1)
         m = m.unsqueeze(1)
         for f in self.up_layers: m = f(m)
-        m = m.squeeze(1)[:, :, 512:-512]
+        m = m.squeeze(1)[:, :, self.indent:-self.indent]
         return m.transpose(1, 2), aux.transpose(1, 2)
 
 
 class WaveRNN(nn.Module):
-    def __init__(self, rnn_dims, fc_dims, bits, pad: int, upsample_factors,
+    def __init__(self, rnn_dims, fc_dims, bits, pad, upsample_factors,
                  feat_dims, compute_dims, res_out_dims, res_blocks,
-                 hop_length, sample_rate):
-        super( WaveRNN, self).__init__()
+                 hop_length, sample_rate, mode='MOL'):
+        super().__init__()
+        self.mode = mode
         self.pad = pad
-        self.n_classes = 30
-        self.training = False
+        if self.mode == 'RAW' :
+            self.n_classes = 2 ** bits
+        elif self.mode == 'MOL' :
+            self.n_classes = 30
+        else :
+            RuntimeError("Unknown model mode value - ", self.mode)
+
         self.rnn_dims = rnn_dims
         self.aux_dims = res_out_dims // 4
         self.hop_length = hop_length
         self.sample_rate = sample_rate
 
         self.upsample = UpsampleNetwork(feat_dims, upsample_factors, compute_dims, res_blocks, res_out_dims, pad)
-        
-        self.I = torch.jit.trace( nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims), example_inputs=torch.rand(1, 2, feat_dims+self.aux_dims+1) )
-        self.fc1 = torch.jit.trace( nn.Linear(rnn_dims + self.aux_dims, fc_dims), example_inputs=torch.rand(1, 2, rnn_dims+self.aux_dims) )
-        self.fc2 = torch.jit.trace( nn.Linear(fc_dims + self.aux_dims, fc_dims), example_inputs=torch.rand(1, 2, fc_dims+self.aux_dims) )
-        self.fc3 = torch.jit.trace( nn.Linear(fc_dims, self.n_classes), example_inputs=torch.rand(1, 2, fc_dims) )
-        
-        # self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
-        # self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
-        # self.fc2 = nn.Linear(fc_dims + self.aux_dims, fc_dims)
-        # self.fc3 = nn.Linear(fc_dims, self.n_classes)
+        self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
         self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
         self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
-        
-        self.gru_cell1 = torch.nn.GRUCell(self.rnn1.input_size, self.rnn1.hidden_size, bias=True)
-        self.gru_cell1.weight_hh.data = self.rnn1.weight_hh_l0.data
-        self.gru_cell1.weight_ih.data = self.rnn1.weight_ih_l0.data
-        self.gru_cell1.bias_hh.data = self.rnn1.bias_hh_l0.data
-        self.gru_cell1.bias_ih.data = self.rnn1.bias_ih_l0.data
-        # self.gru_cell1 = torch.jit.trace( self.gru_cell1, example_inputs=(torch.rand(1, self.rnn1.input_size), torch.zeros(1, rnn_dims))  )
+        #self.rnn1 = SRU( input_size=rnn_dims, hidden_size=rnn_dims, num_layers = 2 )
+        #self.rnn2 = SRU( input_size=rnn_dims+self.aux_dims, hidden_size=rnn_dims, num_layers = 2)
+        self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
+        self.fc2 = nn.Linear(fc_dims + self.aux_dims, fc_dims)
+        self.fc3 = nn.Linear(fc_dims, self.n_classes)
 
-        self.gru_cell2 = torch.nn.GRUCell(self.rnn2.input_size, self.rnn2.hidden_size)
-        self.gru_cell2.weight_hh.data = self.rnn2.weight_hh_l0.data
-        self.gru_cell2.weight_ih.data = self.rnn2.weight_ih_l0.data
-        self.gru_cell2.bias_hh.data = self.rnn2.bias_hh_l0.data
-        self.gru_cell2.bias_ih.data = self.rnn2.bias_ih_l0.data
-        # self.gru_cell2 = torch.jit.trace( self.gru_cell2, example_inputs=(torch.rand(1, self.rnn2.input_size), torch.zeros(1, rnn_dims))  )
-        self.rnn1 = None
-        self.rnn2 = None
         self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
         self.num_params()
+    
 
-				# No grad does not work with PyTorch JIT
-        for param in self.parameters():
-          if param.requires_grad:
-            param.requires_grad = False
+    def forward(self, x, mels):
+        self.step += 1
+        bsize = x.size(0)
+        h1 = torch.zeros(1, bsize, self.rnn_dims).cuda()
+        h2 = torch.zeros(1, bsize, self.rnn_dims).cuda()
+        mels, aux = self.upsample(mels)
 
-    def forward( self, mels ):
-        outputs = []
-        mels = mels.cuda()
-        # wave_len = (mels.size(-1) - 1) * self.hop_length
-        mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad)
-        mels, aux = self.upsample(mels.transpose(1, 2))
+        aux_idx = [self.aux_dims * i for i in range(5)]
+        a1 = aux[:, :, aux_idx[0]:aux_idx[1]]
+        a2 = aux[:, :, aux_idx[1]:aux_idx[2]]
+        a3 = aux[:, :, aux_idx[2]:aux_idx[3]]
+        a4 = aux[:, :, aux_idx[3]:aux_idx[4]]
 
-        b_size, seq_len, _ = mels.size()
-        nr_mix = self.n_classes//3
-        temp = torch.log(- torch.log( torch.zeros((b_size, 1, nr_mix), dtype=torch.float32).uniform_(1e-5, 1.0 - 1e-5).cuda() ))
-        one_hot = torch.zeros( (b_size,1, nr_mix), dtype=torch.float32 ).cuda()
-        u = torch.zeros( (b_size, 1), dtype=torch.float32 ).uniform_(1e-5, 1.0 - 1e-5).cuda()
-        u = (torch.log(u) - torch.log(1. - u))
+        x = torch.cat([x.unsqueeze(-1), mels, a1], dim=2)
+        x = self.I(x)
+        res = x
+        x, _ = self.rnn1(x, h1)
 
-        h1 = torch.zeros(b_size, self.rnn_dims).cuda()
-        h2 = torch.zeros(b_size, self.rnn_dims).cuda()
-        x = torch.zeros(b_size, 1).cuda()
-        d = self.aux_dims
-        aux_splits = []
-        aux_splits.append( aux[:, :, :d])
-        aux_splits.append( aux[:, :, d:d * 2])
-        aux_splits.append( aux[:, :, d * 2:d * 3])
-        aux_splits.append( aux[:, :, d * 3:d * 4])
+        x = x + res
+        res = x
+        x = torch.cat([x, a2], dim=2)
+        x, _ = self.rnn2(x, h2)
+
+        x = x + res
+        x = torch.cat([x, a3], dim=2)
+        x = F.relu(self.fc1(x))
+
+        x = torch.cat([x, a4], dim=2)
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
+
+
+    def generate(self, mels, batched, target, overlap, mu_law, progress_callback=None):
+        mu_law = mu_law if self.mode == 'RAW' else False
+        if progress_callback is not None:
+            progress_callback = self.gen_display
+
+        self.eval()
+        output = []
+        start = time.time()
+        rnn1 = self.get_gru_cell(self.rnn1)
+        rnn2 = self.get_gru_cell(self.rnn2)
+
+        with torch.no_grad():
+            mels = mels.cuda()
+            wave_len = (mels.size(-1) - 1) * self.hop_length
+            mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, side='both')
+            mels, aux = self.upsample(mels.transpose(1, 2))
+
+            if batched:
+                mels = self.fold_with_overlap(mels, target, overlap)
+                aux = self.fold_with_overlap(aux, target, overlap)
+
+            b_size, seq_len, _ = mels.size()
+
+            h1 = torch.zeros(b_size, self.rnn_dims).cuda()
+            h2 = torch.zeros(b_size, self.rnn_dims).cuda()
+            x = torch.zeros(b_size, 1).cuda()
+
+            d = self.aux_dims
+            aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
+
+            for i in range(seq_len):
+
+                m_t = mels[:, i, :]
+
+                a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
+
+                x = torch.cat([x, m_t, a1_t], dim=1)
+                x = self.I(x)
+                h1 = rnn1(x, h1)
+
+                x = x + h1
+                inp = torch.cat([x, a2_t], dim=1)
+                h2 = rnn2(inp, h2)
+
+                x = x + h2
+                x = torch.cat([x, a3_t], dim=1)
+                x = F.relu(self.fc1(x))
+
+                x = torch.cat([x, a4_t], dim=1)
+                x = F.relu(self.fc2(x))
+
+                logits = self.fc3(x)
+
+                if self.mode == 'MOL':
+                    b = logits.unsqueeze(0).transpose(1, 2)
+                    sample = sample_from_discretized_mix_logistic(b)
+                    output.append(sample.view(-1))
+                    # x = torch.FloatTensor([[sample]]).cuda()
+                    x = sample.transpose(0, 1).cuda()
+
+                elif self.mode == 'RAW' :
+                    posterior = F.softmax(logits, dim=1)
+                    distrib = torch.distributions.Categorical(posterior)
+
+                    sample = 2 * distrib.sample().float() / (self.n_classes - 1.) - 1.
+                    output.append(sample)
+                    x = sample.unsqueeze(-1)
+                else:
+                    raise RuntimeError("Unknown model mode value - ", self.mode)
         
-        bb = torch.cat([ mels, aux_splits[0] ], dim=-1)
-        for i in range(seq_len):
-          
-          #a1_t = aux_splits[0][:, i, :]
-          # DO SOMETHING HERE?
-          a2_t = aux_splits[1][:, i, :]
-          a3_t = aux_splits[2][:, i, :]
-          a4_t = aux_splits[3][:, i, :]
+                if progress_callback is not None:
+                    if i % 100 == 0:
+                        gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
+                        progress_callback(i, seq_len, b_size, gen_rate)
+                    
+
+        output = torch.stack(output).transpose(0, 1)
+        output = output.cpu().numpy()
+        output = output.astype(np.float64)
         
-          #x = torch.cat([x, m_t, a1_t], dim=1)
-          x = torch.cat( [x, bb[:,i,:]], dim=-1 )
+        if batched:
+            output = self.xfade_and_unfold(output, target, overlap)
+        else:
+            output = output[0]
 
-          x = self.I(x)
-          h1 = self.gru_cell1(x, h1)
+        if mu_law:
+            output = decode_mu_law(output, self.n_classes, False)
+        #if hp.apply_preemphasis:
+        #    output = de_emphasis(output)
 
-          x = x + h1
-          inp = torch.cat([x, a2_t], dim=1)
-          h2 = self.gru_cell2(inp, h2)
-
-          x = x + h2
-          x = torch.cat([x, a3_t], dim=1)
-          x = torch.nn.functional.relu(self.fc1(x))
-
-          x = torch.cat([x, a4_t], dim=1)
-          x = torch.nn.functional.relu(self.fc2(x))
-
-          logits = self.fc3(x)
-          
-          #needed?
-          b = logits.unsqueeze(0)
-          sample = self.sample_from_discretized_mix_logistic( b, temp, one_hot, u )
-          
-          #avoid
-          #output = sample.view(-1)
-          
-          #avoid?
-          x = sample.transpose(0, 1).cuda()
-          outputs.append(sample)
-
-        wav = torch.stack(outputs).transpose(0, 1)
-        return wav
-
-
-    @torch.jit.export
-    def sample_from_discretized_mix_logistic( self, y, temp_const, one_hot, u ):
-        nr_mix = 10
-        # B x T x C
-        logit_probs = y[:, :, :nr_mix]
-
-        # sample mixture indicator from softmax
-        temp = logit_probs.data - temp_const
-        _, argmax = temp.max(dim=-1)
-
-        one_hot.scatter_(len(argmax.size()), argmax.unsqueeze(-1), 1)
-
-        # select logistic parameters
-        means = torch.sum(y[:, :, nr_mix:2 * nr_mix] * one_hot, dim=-1)
+        # Fade-out at the end to avoid signal cutting out suddenly
+        # fade_out = np.linspace(1, 0, 5 * self.hop_length)
+        # output = output[:wave_len]
+        # output[-5 * self.hop_length:] *= fade_out
         
-        log_scales = torch.clamp( torch.sum(y[:, :, 2 * nr_mix:3 * nr_mix] * one_hot, dim=-1), min=-32.23619130191664)
+        self.train()
+
+        return output
+
+    def to_one_hot( self, tensor, n, fill_with=1. ):
+      # we perform one hot encore with respect to the last axis
+      one_hot = torch.FloatTensor(tensor.size() + (n,)).zero_()
+      if tensor.is_cuda:
+          one_hot = one_hot.cuda()
+      one_hot.scatter_(len(tensor.size()), tensor.unsqueeze(-1), fill_with)
+      return one_hot
+
+    @torch.no_grad()
+    def procs(self, x, i, aux_splits, mels):
+      
+      m_t = mels[:, i, :]
+
+      a1_t = aux_splits[0][:, i, :]
+      a2_t = aux_splits[1][:, i, :]
+      a3_t = aux_splits[2][:, i, :]
+      a4_t = aux_splits[3][:, i, :]
+
+      x = torch.cat([x, m_t, a1_t], dim=1)
+      x = self.I(x)
+      h1 = rnn1(x, h1)
+
+      x = x + h1
+      inp = torch.cat([x, a2_t], dim=1)
+      h2 = rnn2(inp, h2)
+
+      x = x + h2
+      x = torch.cat([x, a3_t], dim=1)
+      x = F.relu(self.fc1(x))
+
+      x = torch.cat([x, a4_t], dim=1)
+      x = F.relu(self.fc2(x))
+
+      logits = self.fc3(x)
+
+      b = logits.unsqueeze(0).transpose(1, 2)
+      
+      assert b.size(1) % 3 == 0
+      sample = sample_from_discretized_mix_logistic( b )
+      output = sample.view(-1)
+      
+      x = sample.transpose(0, 1).cuda()
+
+      return output
+    
+
+    def generate_from_mel(self, mels, batched, overlap, target, mu_law=False, cpu=False, apply_preemphasis=False,  progress_callback=None):
+       # mels = torch.from_numpy( np.array([ mel ]) )
+        mu_law = mu_law if self.mode == 'RAW' else False
+        progress_callback = progress_callback or self.gen_display
+
+        self.eval()
+        output = []
+        start = time.time()
+        rnn1 = self.get_gru_cell(self.rnn1)
+        rnn2 = self.get_gru_cell(self.rnn2)
+
+        with torch.no_grad():
+            if cpu is False:
+                mels = mels.cuda()
+            wave_len = (mels.size(-1) - 1) * self.hop_length
+            mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad, cpu=cpu, side='both')
+            mels, aux = self.upsample(mels.transpose(1, 2))
+            #print(mels.dtype)
+            #print(aux.dtype)
+            if batched:
+                mels = self.fold_with_overlap(mels, target, overlap, cpu)
+                aux = self.fold_with_overlap(aux, target, overlap, cpu)
+
+            b_size, seq_len, _ = mels.size()
+
+            if cpu is False:
+                h1 = torch.zeros(b_size, self.rnn_dims, dtype=mels.dtype).cuda()
+                h2 = torch.zeros(b_size, self.rnn_dims, dtype=mels.dtype).cuda()
+                x = torch.zeros(b_size, 1, dtype=mels.dtype).cuda()
+            else:
+                h1 = torch.zeros(b_size, self.rnn_dims, dtype=mels.dtype)
+                h2 = torch.zeros(b_size, self.rnn_dims, dtype=mels.dtype)
+                x = torch.zeros(b_size, 1, dtype=mels.dtype)
+
+            d = self.aux_dims
+            aux_split = [aux[:, :, d * i:d * (i + 1)] for i in range(4)]
+
+            for i in range(seq_len):
+
+                m_t = mels[:, i, :]
+                a1_t, a2_t, a3_t, a4_t = (a[:, i, :] for a in aux_split)
+                x = torch.cat([x, m_t, a1_t], dim=1)
+                
+                x = self.I(x)
+                h1 = rnn1(x, h1)
+
+                x = x + h1
+                inp = torch.cat([x, a2_t], dim=1)
+                h2 = rnn2(inp, h2)
+
+                x = x + h2
+                x = torch.cat([x, a3_t], dim=1)
+                x = F.relu(self.fc1(x))
+
+                x = torch.cat([x, a4_t], dim=1)
+                x = F.relu(self.fc2(x))
+
+                logits = self.fc3(x)
+
+                if self.mode == 'MOL':
+                    b = logits.unsqueeze(0).transpose(1, 2)
+                    sample = sample_from_discretized_mix_logistic( b )
+                    output.append(sample.view(-1))
+                    # x = torch.FloatTensor([[sample]]).cuda()
+                    if cpu is False:
+                        x = sample.transpose(0, 1).cuda()
+                    else:
+                        x = sample.transpose(0, 1)
+
+                elif self.mode == 'RAW' :
+                    posterior = F.softmax(logits, dim=1)
+                    distrib = torch.distributions.Categorical(posterior)
+
+                    sample = 2 * distrib.sample().float() / (self.n_classes - 1.) - 1.
+                    output.append(sample)
+                    x = sample.unsqueeze(-1)
+                else:
+                    raise RuntimeError("Unknown model mode value - ", self.mode)
+
+                if i % 100 == 0:
+                    gen_rate = (i + 1) / (time.time() - start) * b_size / 1000
+                    progress_callback(i, seq_len, b_size, gen_rate)
+
+        output = torch.stack(output).transpose(0, 1)
+        if cpu is False:
+            output = output.cpu().numpy().astype(np.float64)
+        else:
+            output = output.numpy().astype(np.float64)
         
-        # sample from logistic & clip to interval
-        # we don't actually round to the nearest 8bit value when sampling
-        # u = torch.zeros( means.size(), dtype=means.data.dtype ).uniform_(1e-5, 1.0 - 1e-5).cuda()
-        x = means + torch.exp(log_scales) * u
+        if batched:
+            output = self.xfade_and_unfold(output, target, overlap)
+        else:
+            output = output[0]
 
-        x = torch.clamp(torch.clamp(x, min=-1.), max=1.)
+        if mu_law:
+            output = decode_mu_law(output, self.n_classes, False)
+        if apply_preemphasis:
+            output = de_emphasis(output)
 
-        return x
-
-
-    def pad_tensor_after(self, x, pad: int):
-        b, t, c = x.size()
-        total = t + pad
-        padded = torch.zeros(b, total, c).cuda()
-        padded[:, :t, :] = x
+        # Fade-out at the end to avoid signal cutting out suddenly
+        fade_out = np.linspace(1, 0, 10 * self.hop_length)
+        output = output[:wave_len]
+        output[-10 * self.hop_length:] *= fade_out
         
-        return padded
+        self.train()
+        return output
 
-    def pad_tensor(self, x, pad: int):
+
+    def gen_display(self, i, seq_len, b_size, gen_rate):
+        pbar = progbar(i, seq_len)
+        msg = f'| {pbar} {i*b_size}/{seq_len*b_size} | Batch Size: {b_size} | Gen Rate: {gen_rate:.1f}kHz | '
+        stream(msg)
+
+  
+    def get_gru_cell(self, gru):
+        gru_cell = nn.GRUCell(gru.input_size, gru.hidden_size)
+        gru_cell.weight_hh.data = gru.weight_hh_l0.data
+        gru_cell.weight_ih.data = gru.weight_ih_l0.data
+        gru_cell.bias_hh.data = gru.bias_hh_l0.data
+        gru_cell.bias_ih.data = gru.bias_ih_l0.data
+        return gru_cell
+
+    def pad_tensor(self, x, pad, cpu=False, side='both'):
         # NB - this is just a quick method i need right now
         # i.e., it won't generalise to other shapes/dims
         b, t, c = x.size()
-        total = t + 2 * pad
-        padded = torch.zeros(b, total, c).cuda()
-        padded[:, pad:pad + t, :] = x
-        
+        total = t + 2 * pad if side == 'both' else t + pad
+        if cpu is False:
+            padded = torch.zeros(b, total, c, dtype=x.dtype).cuda()
+        else:
+            padded = torch.zeros(b, total, c)
+        if side == 'before' or side == 'both':
+            padded[:, pad:pad + t, :] = x
+        elif side == 'after':
+            padded[:, :t, :] = x
         return padded
 
     def fold_with_overlap(self, x, target, overlap, cpu=False):
@@ -330,12 +523,12 @@ class WaveRNN(nn.Module):
         if remaining != 0:
             num_folds += 1
             padding = target + 2 * overlap - remaining
-            x = self.pad_tensor_after(x, padding)
+            x = self.pad_tensor(x, padding, cpu=cpu, side='after')
 
         if cpu is False:
-            folded = torch.zeros(num_folds, target + 2 * overlap, features).cuda()
+            folded = torch.zeros(num_folds, target + 2 * overlap, features, dtype=x.dtype).cuda()
         else:
-            folded = torch.zeros(num_folds, target + 2 * overlap, features)
+            folded = torch.zeros(num_folds, target + 2 * overlap, features, dtype=x.dtype)
 
         # Get the values for the folded tensor
         for i in range(num_folds):
@@ -425,10 +618,10 @@ class WaveRNN(nn.Module):
         checkpoint = torch.load(path,map_location=lambda storage, loc: storage)
         print(checkpoint.keys())
         if "optimizer_state" in checkpoint:
-            self.load_state_dict(checkpoint["model_state"], strict=False)
+            self.load_state_dict(checkpoint["model_state"])
         else:
             # Backwards compatibility
-            self.load_state_dict(checkpoint["model"], strict=False)
+            self.load_state_dict(checkpoint["model"])
 
     def load(self, path, optimizer) :
         checkpoint = torch.load(path)
@@ -450,4 +643,3 @@ class WaveRNN(nn.Module):
         parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
         if print_out :
             print('Trainable Parameters: %.3fM' % parameters)
-
