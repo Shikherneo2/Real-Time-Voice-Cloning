@@ -1,0 +1,18 @@
+/home/sdevgupta/wavernn_testing_data/mels/mel-71.npy
+Total time : 9.514856815338135, 9514.856815338135milliseconds
+Rate : 16815.80743727818Hz
+
+Total time : 4.445635795593262, 4445.635795593262milliseconds
+Rate : 28619.528420685918Hz
+
+/home/sdevgupta/wavernn_testing_data/mels/mel-34.npy
+Total time : 4.402476787567139, 4402.476787567139milliseconds
+Rate : 15874.70039532473Hz
+
+/home/sdevgupta/wavernn_testing_data/mels/mel-12.npy
+Total time : 4.4416890144348145, 4441.689014434814milliseconds
+Rate : 22189.75702254142Hz
+
+/home/sdevgupta/wavernn_testing_data/mels/mel-15.npy
+Total time : 4.595983505249023, 4595.983505249023milliseconds
+Rate : 18325.566204449748Hz
