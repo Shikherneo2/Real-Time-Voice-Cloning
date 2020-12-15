@@ -32,6 +32,8 @@ model = WaveRNN(
         res_blocks=hp.voc_res_blocks,
         hop_length=hp.hop_length,
         sample_rate=hp.sample_rate,
+        overlap=8000
+        target=800,
 ).cuda()
 model = torch.jit.script( model )
 
@@ -48,7 +50,7 @@ for i in range(files):
     start = time.time()
 #     wav = model.generate_from_mel( mel, batched=False, overlap=100, target=5000 )
 #     wav = model(mel)
-    wav = model( mel, batched=True, overlap=800, target=8000 )
+    wav = model( mel )
     final = time.time()
     seq_len = mel.shape[-1]*256
 

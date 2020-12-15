@@ -134,7 +134,7 @@ class UpsampleNetwork(nn.Module):
 class WaveRNN(nn.Module):
     def __init__(self, rnn_dims, fc_dims, bits, pad: int, upsample_factors,
                  feat_dims, compute_dims, res_out_dims, res_blocks,
-                 hop_length, sample_rate):
+                 hop_length, sample_rate, target, overlap):
         super( WaveRNN, self).__init__()
         self.pad = pad
         self.n_classes = 30
@@ -173,6 +173,8 @@ class WaveRNN(nn.Module):
         # self.gru_cell2 = torch.jit.trace( self.gru_cell2, example_inputs=(torch.rand(1, self.rnn2.input_size), torch.zeros(1, rnn_dims))  )
         self.rnn1 = None
         self.rnn2 = None
+        self.overlap = target
+        self.target = overlap
         self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
         self.num_params()
 
@@ -181,16 +183,15 @@ class WaveRNN(nn.Module):
           if param.requires_grad:
             param.requires_grad = False
 
-    def forward( self, mels, batched, overlap, target ):
+    def forward( self, mels ):
         outputs = []
         mels = mels.cuda()
         # wave_len = (mels.size(-1) - 1) * self.hop_length
         mels = self.pad_tensor(mels.transpose(1, 2), pad=self.pad)
         mels, aux = self.upsample(mels.transpose(1, 2))
 
-        if batched:
-            mels = self.fold_with_overlap(mels, target, overlap, cpu)
-            aux = self.fold_with_overlap(aux, target, overlap, cpu)
+        mels = self.fold_with_overlap(mels)
+        aux = self.fold_with_overlap(aux)
 
         b_size, seq_len, _ = mels.size()
         nr_mix = self.n_classes//3
@@ -238,14 +239,15 @@ class WaveRNN(nn.Module):
           logits = self.fc3(x)
           
           #needed?
-          b = logits.unsqueeze(0)
+          b = logits.unsqueeze(1)
           sample = self.sample_from_discretized_mix_logistic( b, temp, one_hot, u )
           
           #avoid
           #output = sample.view(-1)
           
           #avoid?
-          x = sample.transpose(0, 1).cuda()
+        #   x = sample.transpose(0, 1).cuda()
+          x = sample
           outputs.append(sample)
 
         wavs = torch.stack(outputs).transpose(0, 1)
@@ -306,7 +308,7 @@ class WaveRNN(nn.Module):
         
         return padded
 
-    def fold_with_overlap(self, x, target, overlap, cpu=False):
+    def fold_with_overlap(self, x):
 
         ''' Fold the tensor with overlap for quick batched inference.
             Overlap will be used for crossfading in xfade_and_unfold()
@@ -335,25 +337,22 @@ class WaveRNN(nn.Module):
         _, total_len, features = x.size()
 
         # Calculate variables needed
-        num_folds = (total_len - overlap) // (target + overlap)
-        extended_len = num_folds * (overlap + target) + overlap
+        num_folds = (total_len - self.overlap) // (self.target + self.overlap)
+        extended_len = num_folds * (self.overlap + self.target) + self.overlap
         remaining = total_len - extended_len
 
         # Pad if some time steps poking out
         if remaining != 0:
             num_folds += 1
-            padding = target + 2 * overlap - remaining
+            padding = self.target + 2 * self.overlap - remaining
             x = self.pad_tensor_after(x, padding)
 
-        if cpu is False:
-            folded = torch.zeros(num_folds, target + 2 * overlap, features).cuda()
-        else:
-            folded = torch.zeros(num_folds, target + 2 * overlap, features)
+        folded = torch.zeros(num_folds, self.target + 2 * self.overlap, features).cuda()
 
         # Get the values for the folded tensor
         for i in range(num_folds):
-            start = i * (target + overlap)
-            end = start + target + 2 * overlap
+            start = i * (self.target + self.overlap)
+            end = start + self.target + 2 * self.overlap
             folded[i] = x[:, start:end, :]
 
         return folded
